@@ -8,13 +8,17 @@ import networkx as nx
 import plotly.graph_objects as go
 import colorsys
 import seaborn as sns
+from collections import defaultdict #for line style
+import dash
+from dash import dcc, html
+from dash.dependencies import Input, Output, State
 
 
 class AirtableVisualizer():
     '''Explain Class'''
     def __init__(self, config):
         self.airtable_token = config.get("airtable_token")
-#region airtable
+#region airtable (pull from db)
     def pull_table_api(self, table_id, data = None, offset=None):
         '''returns all data from a particular table (with pagination)'''
 
@@ -128,16 +132,22 @@ class AirtableVisualizer():
         return_dict.update({f"{key2}|{key}": value for key, key2, value in zip(table_df[key_field1], table_df[key_field2], table_df[value_field])})
         return return_dict
     def grab_data(self):
-        '''explain'''
+        '''grabs data and creates a set of objects that will help translate into components of the visual down below. 
+        b/c bizfunc coordinates the color, we need those, and then conntectiontype will coordinate the lines so we need those, etc...'''
         self.df = self.generate_main_df("Application Connections")
         self.app_bizfunc_dict = self.generate_dict_from_table('Applications', "Name", "Business Function")
-        self.integration_tofrom_bizfunc_dict=self.generate_pipedict_from_table('Application Connections', 'Application Data From', "Application Data To", "Business Function")
+        self.integration_tofrom_name_dict=self.generate_pipedict_from_table('Application Connections', 'Application Data From', "Application Data To", "Name")
         self.integration_name_bizfunc_dict=self.generate_dict_from_table('Application Connections', "Name", "Business Function")
-        self.integration_connecttype_dict=self.generate_dict_from_table('Application Connections', "Name", "Connection Type")
+        self.integration_tofrom_connecttype_dict=self.generate_pipedict_from_table('Application Connections', 'Application Data From', "Application Data To", "Connection Type")
+        self.name_description_dict = self.generate_dict_from_table('Application Connections', "Name", "Further Comments")
+        self.name_description_dict.update(self.generate_dict_from_table('Applications', "Name", "Function"))
+        self.name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
+        self.name_department_dict.update(self.generate_dict_from_table('Applications', "Name", "Department Driver"))
+        self.integration_name_connecttype_dict=self.generate_dict_from_table('Application Connections', "Name", "Connection Type")
 #endregion
-#region plotly
+#region plotly/networkx (arrange network visual)
     #region helpers
-    def adjust_connection_position(self, G, pos, connection, dx, dy):
+    def adjust_connection_position(self, pos, connection, dx, dy):
         """
         Adjusts the positions of nodes and edges of a particular connection by 
         a specified x and/or y amount.
@@ -153,10 +163,22 @@ class AirtableVisualizer():
         pos[node1] = (pos[node1][0] + dx, pos[node1][1] + dy)
         pos[node2] = (pos[node2][0] + dx, pos[node2][1] + dy)
         return pos
-    def adjust_node_position(self, G, pos, node, dx, dy):
+    def adjust_node_position(self, pos, node, dx, dy):
         # Update the position of the specified node
         pos[node] = (pos[node][0] + dx, pos[node][1] + dy)
         return pos
+    def handle_adjustments(self, adjustments, pos):
+        '''takes an adjustments object and makes all adjustments as a one-liner
+        if the key is a tuple, moves both nodes and the edge between them, nothing else (not v useful)
+        if the key is a string, moves that node and all connected edges'''
+        for nodes, adj_values in adjustments.items():
+            x_adj = adj_values['x']
+            y_adj = adj_values['y']
+            if isinstance(nodes, tuple):
+                adjusted_pos = self.adjust_connection_position(pos, nodes, x_adj, y_adj)
+            else:
+                adjusted_pos = self.adjust_node_position(pos, nodes, x_adj, y_adj)
+        return adjusted_pos
     def wrap_text(self, input):
         '''wraps text but replacing spaces with line breaks, making every new space put text on new line'''
         text=str(input)
@@ -206,8 +228,28 @@ class AirtableVisualizer():
         '''returns a color per biz func'''
         if biz_func is None:
             return 'rgba(200,200,200,1)'  # Default color for nodes with no matching data
-        color = self.return_colormap()[biz_func]
+        self.color_map = self.return_colormap()
+        color = self.color_map[biz_func]
         return f'rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})'
+    def get_line_style(self,edge):
+        '''maps a particular line style per connection'''
+        line_style_map = {
+            'Prebuilt Connector': {'color': '#8de5a1', 'line': 'solid'},
+            'CLI': {'color': '#8de5a1', 'line': 'solid'},
+            'IPaas': {'color': '#888', 'line': 'solid'},
+            'VSC Uploads': {'color': '#888', 'line': 'dash'},
+            'Manual': {'color': '#ff9f9b', 'line': 'dash'},
+            'Home-grown API': {'color': '#888', 'line': 'solid'}
+        }
+        connection_type = self.integration_tofrom_connecttype_dict.get(f"{edge[0]}|{edge[1]}")
+        return line_style_map.get(connection_type, {'color': '#888', 'line': 'solid'})
+    def handle_line_style(self, G):
+        '''groups the line styles'''
+        grouped_edges = defaultdict(list)
+        for edge in G.edges():
+            style = self.get_line_style(edge)
+            grouped_edges[(style['color'], style['line'])].append(edge)
+        return grouped_edges
     #endregion
     def load_data_into_visual(self, data):
         '''first step to plotly, data should be df'''
@@ -216,53 +258,54 @@ class AirtableVisualizer():
         pos = nx.kamada_kawai_layout(G)
         return G, pos
     def handle_edges(self, G, pos):
-        '''this handles edges, and the nodes in the minddle of the edge (mnode)'''
-        #EDGES
-        # Generating edge_trace based on the positions of nodes:
-        adjusted_pos = self.adjust_connection_position(G, pos, ("Zoom", "Fathom"), 0.3, 0)
-        adjusted_pos = self.adjust_node_position(G, pos, "Airtable", -.1, -.05)
-        adjusted_pos = self.adjust_node_position(G, pos, "BambooHR", -.05, -.05)
-        adjusted_pos = self.adjust_node_position(G, pos, "Fieldwire", .03, -.03)
-        edge_x, edge_y = [], []
-        mnode_x, mnode_y, mnode_txt, mnode_colors = [], [], [], []
-        for edge in G.edges():
-            x0, y0 = adjusted_pos[edge[0]]
-            x1, y1 = adjusted_pos[edge[1]]
-            edge_x.extend([x0, x1, None])  # None creates a segment, separating edges
-            edge_y.extend([y0, y1, None])
-            mnode_x.extend([(x0 + x1)/2]) # assuming values positive/get midpoint
-            mnode_y.extend([(y0 + y1)/2]) # assumes positive vals/get midpoint
-            integration_name = self.integration_tofrom_bizfunc_dict.get(f"{edge[0]}|{edge[1]}")
-            integration_business_function = self.integration_name_bizfunc_dict.get(integration_name)
-            mnode_colors.append(self.get_color(integration_business_function))
-            mnode_txt.extend([f'{integration_name}']) # hovertext
+        '''this handles edges, and the nodes in the middle of the edge (mnode)'''
 
+        grouped_edges = self.handle_line_style(G)
+        traces = []
 
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='#888'),
-            hoverinfo='text',
-            hovertext="doesn't work",
-            mode='lines'
-        )
+        for (color, line), edges in grouped_edges.items():
+            edge_x, edge_y, mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], [], [], []
 
+            for edge in edges:
+                x0, y0 = pos[edge[0]]
+                x1, y1 = pos[edge[1]]
+                edge_x.extend([x0, x1, None])
+                edge_y.extend([y0, y1, None])
 
+                mnode_x.extend([(x0 + x1) / 2])
+                mnode_y.extend([(y0 + y1) / 2])
+                integration_name = self.integration_tofrom_name_dict.get(f"{edge[0]}|{edge[1]}")
+                integration_business_function = self.integration_name_bizfunc_dict.get(integration_name)
+                mnode_colors.append(self.get_color(integration_business_function))
+                mnode_txt.extend([f'{integration_name}'])
+                connection_name.append(integration_name)
 
-        # idea to replace mid nodes with many midnodes that are invisible: https://stackoverflow.com/questions/74607000/python-networkx-plotly-how-to-display-edges-mouse-over-text
-        mnode_trace = go.Scatter(
-            x=mnode_x, 
-            y=mnode_y, 
-            mode="markers", 
-            showlegend=False,
-            hovertemplate="%{hovertext}<extra></extra>",
-            hovertext=mnode_txt, 
-            marker=dict(
-                color=mnode_colors,  # Using the generated color list
-                opacity=0.5
+            edge_trace = go.Scatter(
+                x=edge_x,
+                y=edge_y,
+                line=dict(width=0.5, color=color, dash=line),
+                hoverinfo='text',
+                hovertext="doesn't work",
+                mode='lines'
             )
-        )
+            traces.append(edge_trace)
 
-        return edge_trace, mnode_trace
+            mnode_trace = go.Scatter(
+                x=mnode_x,
+                y=mnode_y,
+                customdata=connection_name,
+                mode="markers",
+                showlegend=False,
+                hovertemplate="%{hovertext}<extra></extra>",
+                hovertext=mnode_txt,
+                marker=dict(
+                    color=mnode_colors,  # Using the generated color list
+                    opacity=0.5
+                )
+            )
+            traces.append(mnode_trace)
+
+        return traces
     def handle_nodes(self, G, pos):
         '''explain'''
 
@@ -273,17 +316,19 @@ class AirtableVisualizer():
 
         node_adjacencies = []
         node_text = []
+        app_name=[] #for custom metadata that can help w/onclicks
         for node, adjacencies in enumerate(G.adjacency()):
             node_adjacencies.append(len(adjacencies[1]))
             # Generate hover text for each node (app, Biz Func - # Connections)
             node_text.append(f'{adjacencies[0]}, {self.app_bizfunc_dict.get(adjacencies[0])} - {str(len(adjacencies[1]))} connections')  # adjacencies[0] holds the name of the application
-
+            app_name.append(adjacencies[0])
         # adjusted_zoom_fathom = adjust_connection_positions(G, pos, ("Zoom", "Fathom"), 0.3, 0)
 
         node_trace = go.Scatter(
             x=node_x, y=node_y,
             mode='markers+text',
             # text=[adjacencies[0] for adjacencies in G.adjacency()],  # Add node labels
+            customdata=app_name,
             textposition='middle center',  # Centers text in circles
             hoverinfo='text',
             hovertext=node_text,
@@ -298,7 +343,7 @@ class AirtableVisualizer():
         self.annotations = [
             dict(
                 x=x, y=y,
-                xref='x', yref='y',
+            xref='x', yref='y',
                 text=text,
                 showarrow=False,
                 font=dict(size=7),
@@ -307,14 +352,14 @@ class AirtableVisualizer():
             for x, y, text in zip(node_x, node_y, node_text_wrapped)
         ]
         return node_trace
-    def generate_viz(self, edge_trace, mnode_trace, node_trace):
+    def generate_viz(self, edge_traces, node_trace):
         '''explain'''
-        fig = go.Figure(data=[edge_trace, mnode_trace, node_trace],
+        fig = go.Figure(data=edge_traces + [node_trace], 
                         layout=go.Layout(
                             title='<br>Network Graph made with Python',
                             titlefont_size=16,
                             showlegend=False,
-                            hovermode='closest',
+                        hovermode='closest',
                             margin=dict(b=20, l=5, r=5, t=40),
                             annotations=self.annotations,
                             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -323,14 +368,173 @@ class AirtableVisualizer():
                             height=800  # Example height, equal to width to make it square
                         ))
         return fig
+    def create_legend(self):
+        '''explain'''
+        legend_data = []
+        for i, (label, color) in enumerate(self.color_map.items()):
+            legend_data.append(
+                go.Scatter(
+                    x=[1],
+                    y=[len(self.color_map) - i],
+                    mode='markers',
+                    marker=dict(
+                        size=10,
+                        color='rgb({}, {}, {})'.format(int(color[0]*255), int(color[1]*255), int(color[2]*255))
+                    ),
+                    name=label,
+                    hoverinfo='none'
+                )
+            )
+
+        layout = go.Layout(
+            title="Legend",
+            xaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False
+            ),
+            yaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                automargin=True
+            ),
+            margin=dict(l=60, r=10, t=40, b=10),
+            height=400,
+            width=300,
+        )
+
+        return go.Figure(data=legend_data, layout=layout)   
     def handle_visual(self):
         G, pos = self.load_data_into_visual(self.df)
-        edge_trace, mnode_trace = self.handle_edges(G, pos)
-        node_trace = self.handle_nodes(G, pos)
-        fig = self.generate_viz(edge_trace, mnode_trace, node_trace)
+        adjustments = {
+            ("Zoom", "Fathom"): {"x": 0.3, "y": 0},
+        "Airtable": {"x": -.1, "y": -.05},
+        "BambooHR": {"x": -.05, "y": -.05},
+        "Fieldwire": {"x": .03, "y": -.03}
+        }
+        adjusted_pos = self.handle_adjustments(adjustments, pos)
+        edge_traces = self.handle_edges(G, pos)
+        node_trace = self.handle_nodes(G, adjusted_pos)
+        fig = self.generate_viz(edge_traces, node_trace)
+        legend_fig = self.create_legend()
+        return fig, legend_fig
+    def show_locally(self, fig, legend_fig):
+        '''shows graph locally'''
         fig.show()
+        legend_fig.show()
+#endregion
+#region dash (configure dynamic frontend)
+    def dash_wrap_paragraph(self, text):
+        '''dash wrap text is different than the plotly wrap text, which was for node titles. this is for descriptions'''
+
+        # Wrap function
+        def wrap_line(s, max_len):
+            if len(s) <= max_len:
+                return s, ""
+            break_point = s.rfind(' ', 0, max_len)
+            if break_point == -1:
+                return s, ""  # Return the whole string if there's no space
+            return s[:break_point], s[break_point+1:]   
+
+        # Split for the first line
+        line1, rest = wrap_line(text, 58)   
+
+        # Split for the second line
+        line2, rest = wrap_line(rest, 68)   
+
+        # Split for the third line
+        line3, rest = wrap_line(rest, 65)
+        if rest:
+            line3 += "..."  # If there's more content, add "..."    
+
+        return list(filter(None, [line1, line2, line3]))
+    def run_dash(self, fig, legend_fig):
+        '''explain'''
+        app = dash.Dash(__name__)
+
+        # Your initial layout
+        app.layout = html.Div([
+            dcc.Graph(id='network-graph', figure=fig),  # 'fig' is your original Plotly graph
+            dcc.Graph(
+                id='legend',
+                figure=legend_fig,
+                config={'displayModeBar': False}
+            ),
+            html.Div(id='clicked-data', style={'position': 'absolute', 'top': '35px', 'left': '10px'})  # This div will display additional info on click
+        ])
+
+        @app.callback(
+            Output('clicked-data', 'children'),
+            Input('network-graph', 'clickData')
+        )
+        def display_click_data(clickData):
+            if clickData is None:
+                return html.Div("Click on a hoverable to learn more!", style={'margin-top': '20px'})
+
+            # Extract data from the clicked point
+            point_data = clickData['points'][0]
+            customdata=point_data.get('customdata')
+            node_label = point_data['hovertext']  # Assuming hovertext holds the node label
+
+            # Fetch more info based on the clicked node (replace this with your logic)
+            department_driver = self.name_department_dict.get(customdata).lower().capitalize()
+            connection_type = self.integration_name_connecttype_dict.get(customdata)
+            description = f"Description: {self.name_description_dict.get(customdata)}"
+            description_text_wrapped = self.dash_wrap_paragraph(description)
+            if connection_type != None:
+                drilldown_text = [
+                html.H5(f"Node: {node_label}"),
+                html.P(f"Department Driver: {department_driver}"),
+                html.P(f"Connection Type: {connection_type}")]
+            else:
+                drilldown_text = [
+                html.H5(f"Node: {node_label}"),
+                html.P(f"Department Driver: {department_driver}")]
+
+            
+            for line in description_text_wrapped:
+                # adjusting the style makes the line spacing left, so it looks connected
+                drilldown_text.append(html.P(line, style={'margin': '0.25em 0'}))
 
 
+            # Format the information for display
+            return html.Div(drilldown_text)
+        
+        # @app.callback(
+        #     Output('network-graph', 'figure'),
+        #     Input('network-graph', 'clickData'),
+        #     State('network-graph', 'figure')
+        # )
+        # def update_graph_with_annotation(clickData, current_figure):
+        #     if clickData:
+        #         x_coord = clickData['points'][0]['x']
+        #         y_coord = clickData['points'][0]['y']
+
+        #         # Create a new annotation
+        #         new_annotation = {
+        #             'x': x_coord,
+        #             'y': y_coord,
+        #             'xref': 'x',
+        #             'yref': 'y',
+        #             'text': f"You clicked on x: {x_coord}, y: {y_coord}",
+        #             'showarrow': True,
+        #             'arrowhead': 4,
+        #             'ax': 0,
+        #             'ay': -40
+        #         }
+
+        #         # Add the new annotation to the figure's annotations
+        #         if 'annotations' in current_figure['layout']:
+        #             current_figure['layout']['annotations'].append(new_annotation)
+        #         else:
+        #             current_figure['layout']['annotations'] = [new_annotation]
+
+        #         return current_figure
+        #     else:
+        #         return dash.no_update
+
+        app.run_server(debug=True) 
 #endregion
 
 if __name__ == "__main__":
@@ -339,12 +543,5 @@ if __name__ == "__main__":
     }
     av = AirtableVisualizer(config)
     av.grab_data()
-    av.handle_visual()
-
-
-
-# converting major variables ipynb to py
-# df=av.df
-# name_function_dict=av.app_bizfunc_dict
-# connection_dict=av.integration_tofrom_bizfunc_dict
-# integration_bizfunc_dict=av.integration_name_bizfunc_dict
+    fig, legend_fig = av.handle_visual()
+    av.run_dash(fig, legend_fig)
