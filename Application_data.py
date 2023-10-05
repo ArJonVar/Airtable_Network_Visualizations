@@ -408,7 +408,7 @@ class AirtableVisualizer():
     def handle_visual(self):
         G, pos = self.load_data_into_visual(self.df)
         adjustments = {
-            ("Zoom", "Fathom"): {"x": 0.3, "y": 0},
+            ("Zoom", "Fathom"): {"x": 0.4, "y": 0},
         "Airtable": {"x": -.1, "y": -.05},
         "BambooHR": {"x": -.05, "y": -.05},
         "Fieldwire": {"x": .03, "y": -.03}
