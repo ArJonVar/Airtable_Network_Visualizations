@@ -133,8 +133,9 @@ class AirtableVisualizer():
         return return_dict
     def grab_data(self):
         '''grabs data and creates a set of objects that will help translate into components of the visual down below. 
-        b/c bizfunc coordinates the color, we need those, and then conntectiontype will coordinate the lines so we need those, etc...'''
-        self.df = self.generate_main_df("Application Connections")
+        b/c bizfunc coordinates the color, we need those, and then conntectiontype will coordinate the lines so we need those, etc...
+        returns self.df because that is assumed to be the graph inputs. This allows the graph to rerender with different inputs b/c the graphing equation requires inputs, instead of just assuming the input is self.df and there fore cannot be reconfigured (with slicers)'''
+        self.graph_inputs = self.generate_main_df("Application Connections")
         self.app_bizfunc_dict = self.generate_dict_from_table('Applications', "Name", "Business Function")
         self.integration_tofrom_name_dict=self.generate_pipedict_from_table('Application Connections', 'Application Data From', "Application Data To", "Name")
         self.integration_name_bizfunc_dict=self.generate_dict_from_table('Application Connections', "Name", "Business Function")
@@ -143,7 +144,9 @@ class AirtableVisualizer():
         self.name_description_dict.update(self.generate_dict_from_table('Applications', "Name", "Function"))
         self.name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
         self.name_department_dict.update(self.generate_dict_from_table('Applications', "Name", "Department Driver"))
+        self.integration_name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
         self.integration_name_connecttype_dict=self.generate_dict_from_table('Application Connections', "Name", "Connection Type")
+        return self.graph_inputs
 #endregion
 #region plotly/networkx (arrange network visual)
     #region helpers
@@ -171,13 +174,20 @@ class AirtableVisualizer():
         '''takes an adjustments object and makes all adjustments as a one-liner
         if the key is a tuple, moves both nodes and the edge between them, nothing else (not v useful)
         if the key is a string, moves that node and all connected edges'''
+        # if no adjustments, returns existing position and continues
+        adjusted_pos = pos
+
         for nodes, adj_values in adjustments.items():
-            x_adj = adj_values['x']
-            y_adj = adj_values['y']
-            if isinstance(nodes, tuple):
-                adjusted_pos = self.adjust_connection_position(pos, nodes, x_adj, y_adj)
-            else:
-                adjusted_pos = self.adjust_node_position(pos, nodes, x_adj, y_adj)
+            try:
+                x_adj = adj_values['x']
+                y_adj = adj_values['y']
+                if isinstance(nodes, tuple):
+                    adjusted_pos = self.adjust_connection_position(pos, nodes, x_adj, y_adj)
+                else:
+                    adjusted_pos = self.adjust_node_position(pos, nodes, x_adj, y_adj)
+            except KeyError:
+                # wont work if the adjustment was filtered out!
+                pass
         return adjusted_pos
     def wrap_text(self, input):
         '''wraps text but replacing spaces with line breaks, making every new space put text on new line'''
@@ -251,9 +261,10 @@ class AirtableVisualizer():
             grouped_edges[(style['color'], style['line'])].append(edge)
         return grouped_edges
     #endregion
-    def load_data_into_visual(self, data):
+    def load_data_into_visual(self, graph_inputs):
         '''first step to plotly, data should be df'''
-        self.df = data.dropna(subset=['Application Data To'])
+        # should be subset of 1st or second column, not a column w specific name!
+        self.df = graph_inputs.dropna(subset=['Application Data To'])
         G = nx.from_pandas_edgelist(self.df, 'Application Data From', 'Application Data To')
         pos = nx.kamada_kawai_layout(G)
         return G, pos
@@ -356,7 +367,7 @@ class AirtableVisualizer():
         '''explain'''
         fig = go.Figure(data=edge_traces + [node_trace], 
                         layout=go.Layout(
-                            title='<br>Network Graph made with Python',
+                            # title='<br>Network Graph made with Python',
                             titlefont_size=16,
                             showlegend=False,
                         hovermode='closest',
@@ -405,13 +416,13 @@ class AirtableVisualizer():
         )
 
         return go.Figure(data=legend_data, layout=layout)   
-    def handle_visual(self):
-        G, pos = self.load_data_into_visual(self.df)
+    def handle_visual(self, graph_inputs):
+        G, pos = self.load_data_into_visual(graph_inputs)
         adjustments = {
             ("Zoom", "Fathom"): {"x": 0.4, "y": 0},
-        "Airtable": {"x": -.1, "y": -.05},
-        "BambooHR": {"x": -.05, "y": -.05},
-        "Fieldwire": {"x": .03, "y": -.03}
+        # "Airtable": {"x": -.1, "y": -.05},
+        # "BambooHR": {"x": -.05, "y": -.05},
+        # "Fieldwire": {"x": .03, "y": -.03}
         }
         adjusted_pos = self.handle_adjustments(adjustments, pos)
         edge_traces = self.handle_edges(G, pos)
@@ -425,6 +436,11 @@ class AirtableVisualizer():
         legend_fig.show()
 #endregion
 #region dash (configure dynamic frontend)
+    #region dash helpers
+    def create_slicer_options(self, options_list):
+        '''explain'''
+        options = [{'label': option, 'value': option} for option in options_list]
+        return options
     def dash_wrap_paragraph(self, text):
         '''dash wrap text is different than the plotly wrap text, which was for node titles. this is for descriptions'''
 
@@ -449,21 +465,31 @@ class AirtableVisualizer():
             line3 += "..."  # If there's more content, add "..."    
 
         return list(filter(None, [line1, line2, line3]))
+    #endregion
     def run_dash(self, fig, legend_fig):
         '''explain'''
         app = dash.Dash(__name__)
 
+        options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
+
         # Your initial layout
         app.layout = html.Div([
+            dcc.Checklist(
+                id='department-checklist',
+                options=self.create_slicer_options(options_list),
+                value=options_list,  # default value
+                inline=True
+            ),
             dcc.Graph(id='network-graph', figure=fig),  # 'fig' is your original Plotly graph
             dcc.Graph(
                 id='legend',
                 figure=legend_fig,
                 config={'displayModeBar': False}
             ),
-            html.Div(id='clicked-data', style={'position': 'absolute', 'top': '35px', 'left': '10px'})  # This div will display additional info on click
+            html.Div(id='clicked-data', style={'position': 'absolute', 'top': '45px', 'left': '10px'})  # This div will display additional info on click
         ])
 
+        # drilldown text
         @app.callback(
             Output('clicked-data', 'children'),
             Input('network-graph', 'clickData')
@@ -501,39 +527,18 @@ class AirtableVisualizer():
             # Format the information for display
             return html.Div(drilldown_text)
         
-        # @app.callback(
-        #     Output('network-graph', 'figure'),
-        #     Input('network-graph', 'clickData'),
-        #     State('network-graph', 'figure')
-        # )
-        # def update_graph_with_annotation(clickData, current_figure):
-        #     if clickData:
-        #         x_coord = clickData['points'][0]['x']
-        #         y_coord = clickData['points'][0]['y']
+        # slicer updates
+        @app.callback(
+            Output('network-graph', 'figure'),
+            Input('department-checklist', 'value')
+        )
+        def update_graph(selected_departments):
+            # Filter your graph data based on the selected_departments
 
-        #         # Create a new annotation
-        #         new_annotation = {
-        #             'x': x_coord,
-        #             'y': y_coord,
-        #             'xref': 'x',
-        #             'yref': 'y',
-        #             'text': f"You clicked on x: {x_coord}, y: {y_coord}",
-        #             'showarrow': True,
-        #             'arrowhead': 4,
-        #             'ax': 0,
-        #             'ay': -40
-        #         }
-
-        #         # Add the new annotation to the figure's annotations
-        #         if 'annotations' in current_figure['layout']:
-        #             current_figure['layout']['annotations'].append(new_annotation)
-        #         else:
-        #             current_figure['layout']['annotations'] = [new_annotation]
-
-        #         return current_figure
-        #     else:
-        #         return dash.no_update
-
+            filtered_inputs = self.graph_inputs[self.graph_inputs['Department Driver'].isin(selected_departments)]
+            fig, legend_fig = self.handle_visual(filtered_inputs)
+            fig.update_layout(transition_duration=250)
+            return fig
         app.run_server(debug=True) 
 #endregion
 
@@ -542,6 +547,6 @@ if __name__ == "__main__":
         'airtable_token':airtable_token,
     }
     av = AirtableVisualizer(config)
-    av.grab_data()
-    fig, legend_fig = av.handle_visual()
+    inputs = av.grab_data()
+    fig, legend_fig = av.handle_visual(inputs)
     av.run_dash(fig, legend_fig)
