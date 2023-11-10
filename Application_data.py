@@ -642,8 +642,12 @@ class AirtableVisualizer():
                 dbc.Row(
                     [
                         dbc.Col(
-                            dcc.Graph(id='network-graph', figure=fig),
-                            width=9
+                            dcc.Graph(
+                                id='network-graph',
+                                figure=fig,
+                                style={'width': '800px', 'height': 'auto'}  # Set the width to 800px and let height adjust automatically
+                            ),
+                            style={'paddingRight': 0, 'paddingLeft': 0}  # Remove padding from the column
                         ),
                         dbc.Col(
                             [
@@ -656,7 +660,6 @@ class AirtableVisualizer():
                                     config={'displayModeBar': False}
                                 ),
                             ],
-                            width=3
                         ),
                     ],
                     className="align-items-start"  # Align the tops of the columns
