@@ -3,7 +3,7 @@ from requests.structures import CaseInsensitiveDict
 import json
 import time
 import pandas as pd
-from globals import airtable_token
+import os
 import networkx as nx
 import plotly.graph_objects as go
 import colorsys
@@ -570,53 +570,6 @@ class AirtableVisualizer():
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
 
-        # Your updated layout with bootstrap components
-        # app.layout = dbc.Container([
-        #     dbc.Row([
-        #         dbc.Col([
-        #             html.Div([
-        #                 html.H3("Description"),
-        #                 html.P(id='clicked-data', style={'height': '100px'}),  # Adjust height as needed
-        #             ], style={'border': 'thin lightgrey solid', 'marginTop': '20px', 'padding': '10px', 'height': '200px'}),  # Adjust height to match slicer and legend height
-
-        #             html.H3("Department Filter", style={'marginTop': '20px'}),
-        #             dcc.Checklist(
-        #                 id='department-checklist',
-        #                 options=self.create_slicer_options(options_list),
-        #                 value=options_list,  # Default value
-        #                 inline=False  # Set to False for vertical layout
-        #             ),
-        #             html.H3("Legend", style={'marginTop': '20px'}),
-        #             dcc.Graph(
-        #                 id='legend',
-        #                 figure=legend_fig,
-        #                 config={'displayModeBar': False},
-        #                 style={'height': '400px'}  # Adjust height as needed
-        #             )
-        #         ], width=3, style={'padding': 0}),  # Reduce padding for the sidebar column
-
-        #         dbc.Col([
-        #             dcc.Graph(id='network-graph', figure=fig, style={'height': 'calc(100vh - 50px)'})  # Adjust height as needed
-        #         ], width=9, style={'paddingLeft': 0, 'paddingRight': 0})  # Reduce padding for the main graph column
-        #     ], style={'marginTop': '-20px'}),  # Remove gutters for a cleaner look and adjust the top margin as needed
-        # ], fluid=True)
-        
-        # Your initial layout
-        # app.layout = html.Div([
-        #     dcc.Checklist(
-        #         id='department-checklist',
-        #         options=self.create_slicer_options(options_list),
-        #         value=options_list,  # default value
-        #         inline=True
-        #     ),
-        #     dcc.Graph(id='network-graph', figure=fig),  # 'fig' is your original Plotly graph
-        #     dcc.Graph(
-        #         id='legend',
-        #         figure=legend_fig,
-        #         config={'displayModeBar': False}
-        #     ),
-        #     html.Div(id='clicked-data', style={'position': 'absolute', 'top': '45px', 'left': '10px'})  # This div will display additional info on click
-        # ])
         app.layout = dbc.Container(
             [
                 dbc.Row(
@@ -718,6 +671,7 @@ class AirtableVisualizer():
 #endregion
 
 if __name__ == "__main__":
+    airtable_token = os.environ.get('AIRTABLE_TOKEN')
     config = {
         'airtable_token':airtable_token,
     }
@@ -725,4 +679,3 @@ if __name__ == "__main__":
     inputs = av.grab_data()
     fig, legend_fig = av.handle_visual(inputs)
     av.run_dash(fig, legend_fig)
-    # av.run_dash(fig, legend_fig)
