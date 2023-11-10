@@ -10,8 +10,10 @@ import colorsys
 import seaborn as sns
 from collections import defaultdict #for line style
 import dash
+import networkx as nx
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+import dash_bootstrap_components as dbc
 
 
 class AirtableVisualizer():
@@ -150,6 +152,61 @@ class AirtableVisualizer():
 #endregion
 #region plotly/networkx (arrange network visual)
     #region helpers
+    def find_disconnected_clusters(self, G):
+        """
+        Solves the issues of diconnected clusters overlaying over each other and adding noise to the visual
+
+        finds subgraphs, and creates report of which nodes need to connect to make everything part of one graph
+        """
+        # Find all connected components
+        components = list(nx.connected_components(G))
+        if len(components) <= 1:
+            # No need to connect clusters if there's only one
+            return []
+
+        self.new_connections = []  # List to hold the newly connected node pairs
+        for i in range(len(components) - 1):
+            # Select a node from the current component and the next
+            node_from_current = list(components[i])[0]
+            node_from_next = list(components[i + 1])[0]
+            # Record the new connection
+            self.new_connections.append((node_from_current, node_from_next))
+        
+        return self.new_connections
+    def handle_disconnected_clusters(self, G):
+        '''looks for disconeccted clusters, reccomends connections for nodes, adds this to DF with business function CONNECT CLUSTERS'''
+        # Sample data for `new_connections`
+        new_connections = self.find_disconnected_clusters(G)
+
+        # Define a template for the new rows
+        new_row_template = {
+            'id': "",
+            'createdTime': "",
+            'Business Function': "CONNECT CLUSTERS",
+            'Further Comments': "CONNECT CLUSTERS",
+            'Connection Type': "CONNECT CLUSTERS",
+            'Department Driver': "CONNECT CLUSTERS",
+            'Application Data To': "",
+            'Name': "",
+            'Application Data From': "",
+            'Status': "Active",
+            'Direction': "Bidirectional"
+        }
+
+        # Iterate through each connection pair and append a new row to `self.df`
+        for i, connection in enumerate(new_connections):
+            new_row = new_row_template.copy()
+            new_row['Application Data From'] = connection[0]
+            new_row['Application Data To'] = connection[1]
+            new_row['Name'] = f"CONNECT CLUSTERS {i}" 
+        
+            # Turn the new row into a DataFrame before concatenation
+            new_row_df = pd.DataFrame([new_row])
+        
+            # Concatenate the new DataFrame with the existing one
+            self.df = pd.concat([self.df, new_row_df], ignore_index=True)
+
+        return new_connections  
     def adjust_connection_position(self, pos, connection, dx, dy):
         """
         Adjusts the positions of nodes and edges of a particular connection by 
@@ -166,6 +223,11 @@ class AirtableVisualizer():
         pos[node1] = (pos[node1][0] + dx, pos[node1][1] + dy)
         pos[node2] = (pos[node2][0] + dx, pos[node2][1] + dy)
         return pos
+    def remove_invisble_edges(self, G, new_connetions):
+        '''Connections were fabricated to produce clean pos (positions) on the graph. Once the positions are generated, we want to delete the new connections, as they are not based on the input'''
+        for connection in new_connetions:
+            if G.has_edge(connection[0], connection[1]):
+                G.remove_edge(connection[0], connection[1])
     def adjust_node_position(self, pos, node, dx, dy):
         # Update the position of the specified node
         pos[node] = (pos[node][0] + dx, pos[node][1] + dy)
@@ -195,26 +257,28 @@ class AirtableVisualizer():
         return text.replace(' ', '<br>')
     def return_colormap(self):
         '''explain'''
+        # WHY IS THIS HARDCODED???
         unique_business_functions = ["Business Function Scripting", 
                                      "Enhanced Productivity", 
                                      "Safety & Compliance", 
-                                     "CRM", 
+                                    #  "CRM", 
                                      "File Management", 
-                                     "Issue Tracking/Support System", 
-                                     "Financial Management Systems", 
+                                    #  "Issue Tracking/Support System", 
+                                     "Financial Management", 
                                      "User Friendly Database", 
                                      "Communication", 
-                                     "Business Intelligence", 
-                                     "Engineering", 
+                                    #  "Business Intelligence", 
+                                    #  "Engineering", 
                                      "Employee Insurance", 
                                      "Human Resource Management", 
-                                     "Recruiting",
+                                    #  "Recruiting",
                                     #  "Employee Investment",
-                                     "Contract Management",
+                                    #  "Contract Management",
                                      "Security",
+                                     "IT Ticket Management",
                                      "Learning/Training",
                                      "Asset Creation/Editing",
-                                     "Server/Data Management",
+                                     "Data Management",
                                      "Marketing"]
 
 
@@ -249,7 +313,8 @@ class AirtableVisualizer():
             'IPaas': {'color': '#888', 'line': 'solid'},
             'VSC Uploads': {'color': '#888', 'line': 'dash'},
             'Manual': {'color': '#ff9f9b', 'line': 'dash'},
-            'Home-grown API': {'color': '#888', 'line': 'solid'}
+            'Home-grown API': {'color': '#888', 'line': 'solid'},
+            # 'CONNECT CLUSTERS': {'color': 'rgba(0, 0, 0, 0)', 'line': 'dash'}
         }
         connection_type = self.integration_tofrom_connecttype_dict.get(f"{edge[0]}|{edge[1]}")
         return line_style_map.get(connection_type, {'color': '#888', 'line': 'solid'})
@@ -265,9 +330,12 @@ class AirtableVisualizer():
         '''first step to plotly, data should be df'''
         # should be subset of 1st or second column, not a column w specific name!
         self.df = graph_inputs.dropna(subset=['Application Data To'])
-        G = nx.from_pandas_edgelist(self.df, 'Application Data From', 'Application Data To')
-        pos = nx.kamada_kawai_layout(G)
-        return G, pos
+        initial_G = nx.from_pandas_edgelist(self.df, 'Application Data From', 'Application Data To')
+        new_connections = self.handle_disconnected_clusters(initial_G)
+        self.G = nx.from_pandas_edgelist(self.df, 'Application Data From', 'Application Data To')
+        pos = nx.kamada_kawai_layout(self.G)
+        self.remove_invisble_edges(self.G, new_connections)
+        return self.G, pos
     def handle_edges(self, G, pos):
         '''this handles edges, and the nodes in the middle of the edge (mnode)'''
 
@@ -287,6 +355,7 @@ class AirtableVisualizer():
                 mnode_y.extend([(y0 + y1) / 2])
                 integration_name = self.integration_tofrom_name_dict.get(f"{edge[0]}|{edge[1]}")
                 integration_business_function = self.integration_name_bizfunc_dict.get(integration_name)
+                # print(integration_name, integration_business_function)
                 mnode_colors.append(self.get_color(integration_business_function))
                 mnode_txt.extend([f'{integration_name}'])
                 connection_name.append(integration_name)
@@ -331,7 +400,8 @@ class AirtableVisualizer():
         for node, adjacencies in enumerate(G.adjacency()):
             node_adjacencies.append(len(adjacencies[1]))
             # Generate hover text for each node (app, Biz Func - # Connections)
-            node_text.append(f'{adjacencies[0]}, {self.app_bizfunc_dict.get(adjacencies[0])} - {str(len(adjacencies[1]))} connections')  # adjacencies[0] holds the name of the application
+            # node_text.append(f'{adjacencies[0]}, {self.app_bizfunc_dict.get(adjacencies[0])} - {str(len(adjacencies[1]))} connections')  # adjacencies[0] holds the name of the application
+            node_text.append(f'{adjacencies[0]}, {self.app_bizfunc_dict.get(adjacencies[0])}')
             app_name.append(adjacencies[0])
         # adjusted_zoom_fathom = adjust_connection_positions(G, pos, ("Zoom", "Fathom"), 0.3, 0)
 
@@ -371,7 +441,7 @@ class AirtableVisualizer():
                             titlefont_size=16,
                             showlegend=False,
                         hovermode='closest',
-                            margin=dict(b=20, l=5, r=5, t=40),
+                            margin=dict(b=20, l=5, r=5, t=2),
                             annotations=self.annotations,
                             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -379,7 +449,7 @@ class AirtableVisualizer():
                             height=800  # Example height, equal to width to make it square
                         ))
         return fig
-    def create_legend(self):
+    def create_legend_old(self):
         '''explain'''
         legend_data = []
         for i, (label, color) in enumerate(self.color_map.items()):
@@ -398,7 +468,7 @@ class AirtableVisualizer():
             )
 
         layout = go.Layout(
-            title="Legend",
+            # title="Legend",
             xaxis=dict(
                 showgrid=False,
                 zeroline=False,
@@ -410,25 +480,53 @@ class AirtableVisualizer():
                 showticklabels=False,
                 automargin=True
             ),
-            margin=dict(l=60, r=10, t=40, b=10),
+            margin=dict(l=2, r=2, t=2, b=10),
+            # margin=dict(l=60, r=10, t=40, b=10),
             height=400,
             width=300,
         )
 
         return go.Figure(data=legend_data, layout=layout)   
+    def create_legend(self):
+        '''Create a legend figure without an accompanying graph.'''
+        legend_data = [
+            go.Scatter(
+                x=[None],  # No actual data points
+                y=[None],
+                mode='markers',
+                marker=dict(
+                    size=10,
+                    color=f'rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})'
+                ),
+                name=label,
+                hoverinfo='none'
+            ) for i, (label, color) in enumerate(self.color_map.items())
+        ]
+
+        layout = {
+            'xaxis': {'visible': False},
+            'yaxis': {'visible': False},
+            'margin': {'l': 0, 'r': 0, 't': 0, 'b': 0},
+            'height': 400,
+            'width': 300
+        }
+
+        return go.Figure(data=legend_data, layout=layout)
+
     def handle_visual(self, graph_inputs):
-        G, pos = self.load_data_into_visual(graph_inputs)
-        adjustments = {
-            ("Zoom", "Fathom"): {"x": 0.4, "y": 0},
+        G, adjusted_pos = self.load_data_into_visual(graph_inputs)
+        # adjustments = {
+            # ("Zoom", "Fathom"): {"x": 0.4, "y": 0},
         # "Airtable": {"x": -.1, "y": -.05},
         # "BambooHR": {"x": -.05, "y": -.05},
         # "Fieldwire": {"x": .03, "y": -.03}
-        }
-        adjusted_pos = self.handle_adjustments(adjustments, pos)
-        edge_traces = self.handle_edges(G, pos)
+        # }
+        # adjusted_pos = self.handle_adjustments(adjustments, pos)
+        edge_traces = self.handle_edges(G, adjusted_pos)
         node_trace = self.handle_nodes(G, adjusted_pos)
         fig = self.generate_viz(edge_traces, node_trace)
         legend_fig = self.create_legend()
+        # return fig, legend_fig, 
         return fig, legend_fig
     def show_locally(self, fig, legend_fig):
         '''shows graph locally'''
@@ -468,26 +566,105 @@ class AirtableVisualizer():
     #endregion
     def run_dash(self, fig, legend_fig):
         '''explain'''
-        app = dash.Dash(__name__)
+        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
 
+        # Your updated layout with bootstrap components
+        # app.layout = dbc.Container([
+        #     dbc.Row([
+        #         dbc.Col([
+        #             html.Div([
+        #                 html.H3("Description"),
+        #                 html.P(id='clicked-data', style={'height': '100px'}),  # Adjust height as needed
+        #             ], style={'border': 'thin lightgrey solid', 'marginTop': '20px', 'padding': '10px', 'height': '200px'}),  # Adjust height to match slicer and legend height
+
+        #             html.H3("Department Filter", style={'marginTop': '20px'}),
+        #             dcc.Checklist(
+        #                 id='department-checklist',
+        #                 options=self.create_slicer_options(options_list),
+        #                 value=options_list,  # Default value
+        #                 inline=False  # Set to False for vertical layout
+        #             ),
+        #             html.H3("Legend", style={'marginTop': '20px'}),
+        #             dcc.Graph(
+        #                 id='legend',
+        #                 figure=legend_fig,
+        #                 config={'displayModeBar': False},
+        #                 style={'height': '400px'}  # Adjust height as needed
+        #             )
+        #         ], width=3, style={'padding': 0}),  # Reduce padding for the sidebar column
+
+        #         dbc.Col([
+        #             dcc.Graph(id='network-graph', figure=fig, style={'height': 'calc(100vh - 50px)'})  # Adjust height as needed
+        #         ], width=9, style={'paddingLeft': 0, 'paddingRight': 0})  # Reduce padding for the main graph column
+        #     ], style={'marginTop': '-20px'}),  # Remove gutters for a cleaner look and adjust the top margin as needed
+        # ], fluid=True)
+        
         # Your initial layout
-        app.layout = html.Div([
-            dcc.Checklist(
-                id='department-checklist',
-                options=self.create_slicer_options(options_list),
-                value=options_list,  # default value
-                inline=True
-            ),
-            dcc.Graph(id='network-graph', figure=fig),  # 'fig' is your original Plotly graph
-            dcc.Graph(
-                id='legend',
-                figure=legend_fig,
-                config={'displayModeBar': False}
-            ),
-            html.Div(id='clicked-data', style={'position': 'absolute', 'top': '45px', 'left': '10px'})  # This div will display additional info on click
-        ])
+        # app.layout = html.Div([
+        #     dcc.Checklist(
+        #         id='department-checklist',
+        #         options=self.create_slicer_options(options_list),
+        #         value=options_list,  # default value
+        #         inline=True
+        #     ),
+        #     dcc.Graph(id='network-graph', figure=fig),  # 'fig' is your original Plotly graph
+        #     dcc.Graph(
+        #         id='legend',
+        #         figure=legend_fig,
+        #         config={'displayModeBar': False}
+        #     ),
+        #     html.Div(id='clicked-data', style={'position': 'absolute', 'top': '45px', 'left': '10px'})  # This div will display additional info on click
+        # ])
+        app.layout = dbc.Container(
+            [
+                dbc.Row(
+                    dbc.Col(
+                        html.H2("IT Application Integration Map", className="text-center"),
+                        width=12
+                    ),
+                    className="mb-4"  # Adjust bottom margin as needed
+                ),
+                dbc.Row(
+                    dbc.Col(
+                        dcc.Checklist(
+                            id='department-checklist',
+                            options=self.create_slicer_options(options_list),
+                            value=options_list,  # Default value
+                            inline=True,
+                            inputStyle={"margin-right": "5px", "margin-left": "5px"}  # Adds space around the checkbox itself
+                        ),
+                        width=12  # This takes the full width
+                    ),
+                    className="mb-3"  # Adjust bottom margin as needed
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Graph(id='network-graph', figure=fig),
+                            width=9
+                        ),
+                        dbc.Col(
+                            [
+                                html.H3("Description"),
+                                html.Div(id='clicked-data'),  # This div will display additional info on click
+                                html.H3("Legend", className="mt-4"),  # Add margin-top for spacing
+                                dcc.Graph(
+                                    id='legend',
+                                    figure=legend_fig,
+                                    config={'displayModeBar': False}
+                                ),
+                            ],
+                            width=3
+                        ),
+                    ],
+                    className="align-items-start"  # Align the tops of the columns
+                ),
+            ],
+            fluid=True
+        )
+
 
         # drilldown text
         @app.callback(
@@ -508,6 +685,7 @@ class AirtableVisualizer():
             connection_type = self.integration_name_connecttype_dict.get(customdata)
             description = f"Description: {self.name_description_dict.get(customdata)}"
             description_text_wrapped = self.dash_wrap_paragraph(description)
+            # print(customdata, department_driver, connection_type)
             if connection_type != None:
                 drilldown_text = [
                 html.H5(f"Node: {node_label}"),
@@ -539,7 +717,7 @@ class AirtableVisualizer():
             fig, legend_fig = self.handle_visual(filtered_inputs)
             fig.update_layout(transition_duration=250)
             return fig
-        app.run_server(debug=True) 
+        app.run_server(debug=True, port=8053) 
 #endregion
 
 if __name__ == "__main__":
@@ -550,3 +728,4 @@ if __name__ == "__main__":
     inputs = av.grab_data()
     fig, legend_fig = av.handle_visual(inputs)
     av.run_dash(fig, legend_fig)
+    # av.run_dash(fig, legend_fig)
