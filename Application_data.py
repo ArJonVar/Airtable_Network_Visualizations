@@ -673,12 +673,12 @@ class AirtableVisualizer():
 # if __name__ == "__main__":
 # initialize
 print('initializing...')
+print("TEST: ", os.environ.get('test'))
+print("TEST: ", type(os.environ.get('AIRTABLE_TOKEN')))
 config = {
     'airtable_token': os.environ.get('AIRTABLE_TOKEN'),
 }
 av = AirtableVisualizer(config)
-
-
 # fetch data
 print("fetching data...")
 inputs = av.grab_data()
