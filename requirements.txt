@@ -6,3 +6,4 @@ seaborn
 dash
 dash-bootstrap-components
 gunicorn
+scipy
