@@ -627,20 +627,14 @@ class AirtableVisualizer():
                     className="mb-4"  # Adjust bottom margin as needed
                 ),
                 dbc.Row(
-                    dbc.Col(
+                    [
                         dcc.Checklist(
                             id='department-checklist',
                             options=self.create_slicer_options(options_list),
                             value=options_list,  # Default value
                             inline=True,
-                            inputStyle={"margin-right": "5px", "margin-left": "5px"}  # Adds space around the checkbox itself
+                            inputStyle={"margin-right": "3px", "margin-left": "6px"}  # Adds space around the checkbox itself
                         ),
-                        width=12  # This takes the full width
-                    ),
-                    className="mb-3"  # Adjust bottom margin as needed
-                ),
-                dbc.Row(
-                    [
                         dbc.Col(
                             dcc.Graph(
                                 id='network-graph',
