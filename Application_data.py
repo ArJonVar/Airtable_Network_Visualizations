@@ -566,10 +566,8 @@ class AirtableVisualizer():
 
         return list(filter(None, [line1, line2, line3]))
     #endregion
-    def run_dash(self, fig, legend_fig):
+    def run_dash(self, app, fig, legend_fig):
         '''explain'''
-        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
-        server = app.server
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
 
@@ -680,4 +678,4 @@ if __name__ == "__main__":
     av = AirtableVisualizer(config)
     inputs = av.grab_data()
     fig, legend_fig = av.handle_visual(inputs)
-    av.run_dash(fig, legend_fig)
+    av.run_dash(app, fig, legend_fig)
