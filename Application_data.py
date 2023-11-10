@@ -90,7 +90,7 @@ class AirtableVisualizer():
         # make a list of all secondary records
         secondary_records = []
         for id in list_of_secondary_table_ids:
-            time.sleep(1)
+            time.sleep(.25)
             for record in self.pull_table_api(id):
                 secondary_records.append(record) 
 
@@ -460,44 +460,6 @@ class AirtableVisualizer():
                             height=800  # Example height, equal to width to make it square
                         ))
         return fig
-    def create_legend_old(self):
-        '''explain'''
-        legend_data = []
-        for i, (label, color) in enumerate(self.color_map.items()):
-            legend_data.append(
-                go.Scatter(
-                    x=[1],
-                    y=[len(self.color_map) - i],
-                    mode='markers',
-                    marker=dict(
-                        size=10,
-                        color='rgb({}, {}, {})'.format(int(color[0]*255), int(color[1]*255), int(color[2]*255))
-                    ),
-                    name=label,
-                    hoverinfo='none'
-                )
-            )
-
-        layout = go.Layout(
-            # title="Legend",
-            xaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False
-            ),
-            yaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                automargin=True
-            ),
-            margin=dict(l=2, r=2, t=2, b=10),
-            # margin=dict(l=60, r=10, t=40, b=10),
-            height=400,
-            width=300,
-        )
-
-        return go.Figure(data=legend_data, layout=layout)   
     def create_legend(self):
         '''Create a legend figure without an accompanying graph.'''
         legend_data = [
@@ -546,7 +508,16 @@ class AirtableVisualizer():
 #region dash (configure dynamic frontend)
     #region dash helpers
     def create_slicer_options(self, options_list):
-        '''explain'''
+        """
+        Generate options for a Dash slicer (filter) component based on a list of options.
+        This method is used to create selectable filter options in the Dash app.
+    
+        Parameters:
+            options_list (list): A list of option values for the slicer.
+    
+        Returns:
+            list: A list of dictionaries, each representing an option for the Dash slicer.
+        """
         options = [{'label': option, 'value': option} for option in options_list]
         return options
     def dash_wrap_paragraph(self, text):
@@ -575,7 +546,15 @@ class AirtableVisualizer():
         return list(filter(None, [line1, line2, line3]))
     #endregion
     def run_dash(self, app, fig, legend_fig):
-        '''explain'''
+        """
+        Configure and run the Dash application with the provided network graph and legend.
+        This function sets up the layout and callbacks of the Dash app.
+
+        Parameters:
+            app (dash.Dash): The Dash application instance.
+            fig (go.Figure): The Plotly graph object for the network graph.
+            legend_fig (go.Figure): The Plotly graph object for the legend.
+        """
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
 
