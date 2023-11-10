@@ -24,14 +24,14 @@ class AirtableVisualizer():
     def __init__(self, config):
         self.airtable_token = config.get("airtable_token")
 #region airtable (pull from db)
-    def pull_table_api(self, table_id, data = None, offset=None):
+    def pull_table_api(self, table_id, data = None, offset=None, max_retries=5):
         '''returns all data from a particular table (with pagination)'''
 
         if data is None:
             data = []
 
         headers = {
-        'Authorization': f'Bearer {self.airtable_token}',
+            'Authorization': f'Bearer {self.airtable_token}',
         }
         params = {
             'view': 'Grid view',
@@ -39,15 +39,22 @@ class AirtableVisualizer():
         if offset:
             params['offset'] = offset
 
-        response = requests.get(f"https://api.airtable.com/v0/appY3Ht2ufuvQ0f18/{table_id}", params=params, headers=headers)
-        if response.status_code != 200:
-            raise Exception(f'Failed to retrieve data: {response.content}')
-        resp_dict = json.loads(response.content.decode('utf-8'))
-        data.extend(resp_dict.get('records', []))
-        if resp_dict.get('offset'):
-            return self.pull_table_api(table_id, data, resp_dict.get('offset'))
-        else:
-            return data 
+        retry_count = 0
+        while retry_count < max_retries:
+            response = requests.get(f"https://api.airtable.com/v0/appY3Ht2ufuvQ0f18/{table_id}", params=params, headers=headers)
+
+            if response.status_code == 200:
+                resp_dict = json.loads(response.content.decode('utf-8'))
+                data.extend(resp_dict.get('records', []))
+                if resp_dict.get('offset'):
+                    return self.pull_table_api(table_id, data, resp_dict.get('offset'))
+                else:
+                    return data
+            elif response.status_code == 429:  # Rate limit exceeded
+                retry_count += 1
+                time.sleep(2 ** retry_count)  # Exponential backoff
+            else:
+                raise Exception(f'Failed to retrieve data: {response.content}')       
     def list_to_first_str(self, record):
         '''used to clean relational data b/c when it is converted from ID to str, str is in a list, but final table should not be lists'''
         cleaned_record = {}  # Create an empty dictionary to hold the cleaned data
@@ -83,6 +90,7 @@ class AirtableVisualizer():
         # make a list of all secondary records
         secondary_records = []
         for id in list_of_secondary_table_ids:
+            time.sleep(1)
             for record in self.pull_table_api(id):
                 secondary_records.append(record) 
 
