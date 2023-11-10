@@ -5,3 +5,4 @@ plotly
 seaborn
 dash
 dash-bootstrap-components
+gunicorn
