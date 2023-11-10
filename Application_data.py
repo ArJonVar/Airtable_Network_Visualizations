@@ -52,7 +52,7 @@ class AirtableVisualizer():
                     return data
             elif response.status_code == 429:  # Rate limit exceeded
                 retry_count += 1
-                time.sleep(2 ** retry_count)  # Exponential backoff
+                time.sleep(2)  # Exponential backoff
             else:
                 raise Exception(f'Failed to retrieve data: {response.content}')       
     def list_to_first_str(self, record):
@@ -90,7 +90,6 @@ class AirtableVisualizer():
         # make a list of all secondary records
         secondary_records = []
         for id in list_of_secondary_table_ids:
-            time.sleep(.25)
             for record in self.pull_table_api(id):
                 secondary_records.append(record) 
 
