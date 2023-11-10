@@ -17,6 +17,7 @@ import dash_bootstrap_components as dbc
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
+app.layout = html.H2("Initializing...")
 
 class AirtableVisualizer():
     '''Explain Class'''
@@ -514,7 +515,6 @@ class AirtableVisualizer():
         }
 
         return go.Figure(data=legend_data, layout=layout)
-
     def handle_visual(self, graph_inputs):
         G, adjusted_pos = self.load_data_into_visual(graph_inputs)
         # adjustments = {
@@ -670,12 +670,19 @@ class AirtableVisualizer():
             return fig
 #endregion
 
-if __name__ == "__main__":
-    airtable_token = os.environ.get('AIRTABLE_TOKEN')
-    config = {
-        'airtable_token':airtable_token,
-    }
-    av = AirtableVisualizer(config)
-    inputs = av.grab_data()
-    fig, legend_fig = av.handle_visual(inputs)
-    av.run_dash(app, fig, legend_fig)
+# if __name__ == "__main__":
+# initialize
+print('initializing...')
+config = {
+    'airtable_token': os.environ.get('AIRTABLE_TOKEN'),
+}
+av = AirtableVisualizer(config)
+
+
+# fetch data
+print("fetching data...")
+inputs = av.grab_data()
+fig, legend_fig = av.handle_visual(inputs)
+# run Dash App
+print('running Dash...')
+av.run_dash(app, fig, legend_fig)
