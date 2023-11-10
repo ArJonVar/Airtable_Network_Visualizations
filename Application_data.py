@@ -15,6 +15,8 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
 
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+server = app.server
 
 class AirtableVisualizer():
     '''Explain Class'''
@@ -567,6 +569,7 @@ class AirtableVisualizer():
     def run_dash(self, fig, legend_fig):
         '''explain'''
         app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+        server = app.server
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
 
@@ -667,7 +670,6 @@ class AirtableVisualizer():
             fig, legend_fig = self.handle_visual(filtered_inputs)
             fig.update_layout(transition_duration=250)
             return fig
-        app.run_server(debug=True, port=8053) 
 #endregion
 
 if __name__ == "__main__":
