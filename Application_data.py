@@ -127,37 +127,48 @@ class AirtableVisualizer():
         records= self.completely_populate_one_table(primary_table_id,list_of_secondary_table_ids)
 
         return pd.DataFrame(records)
-    def generate_dict_from_table(self, table, key_field, value_field):
-        '''used to make dictionaries like name/biz function dict that can decide color/size of nodes/edges'''
+    def generate_dict_from_table(self, table, key_field, value_field, value_field2= ""):
+        '''used to make dictionaries like name/biz function dict that can decide color/size of nodes/edges
+        value_field2 handles returning a list with both value fields (useful for holding both nodes of the connection)'''
         primary_table_id, list_of_secondary_table_ids = self.generate_pns_table_ids(table)
         records= self.completely_populate_one_table(primary_table_id,list_of_secondary_table_ids)        
 
         table_df = pd.DataFrame(records)
-        return {key: value for key, value in zip(table_df[key_field], table_df[value_field])}    
-    def generate_pipedict_from_table(self, table, key_field1, key_field2, value_field):
-        '''used to make dictionaries like name/biz function dict that can decide color/size of nodes/edges'''
-        primary_table_id, list_of_secondary_table_ids = self.generate_pns_table_ids(table)
-        records= self.completely_populate_one_table(primary_table_id,list_of_secondary_table_ids)        
+        if value_field2 == "":
+            return {key: value for key, value in zip(table_df[key_field], table_df[value_field])}   
+        else:
+            return {key: [value1, value2] for key, value1, value2 in zip(table_df[key_field], table_df[value_field], table_df[value_field2])} 
+    def generate_duplicate_reference(self):
+        '''collects data on duplicate values because they will be handled differently on the group (will have multiple lines, one for each integration)
+        I use tuple(sorted()) to make sure its a duplicate even if the to and from are in different orders'''
+        complete_tofrom_list = [tuple(sorted(self.integration_name_tofrom_dict[key])) for key in self.integration_name_tofrom_dict]
+        
+        duplicate_reference = {}
+        loop_history = []
+        for key in self.integration_name_tofrom_dict:
+            current_tofrom =  tuple(sorted(self.integration_name_tofrom_dict[key]))
+            dup_index = loop_history.count(current_tofrom)
+            loop_history.append(current_tofrom)
+            dup_count = complete_tofrom_list.count(current_tofrom)
+            if dup_count != 1:
+                duplicate_reference[key] = (current_tofrom, dup_count, dup_index)
 
-        table_df = pd.DataFrame(records)
-        return_dict =  {f"{key}|{key2}": value for key, key2, value in zip(table_df[key_field1], table_df[key_field2], table_df[value_field])}
-        return_dict.update({f"{key2}|{key}": value for key, key2, value in zip(table_df[key_field1], table_df[key_field2], table_df[value_field])})
-        return return_dict
+        return duplicate_reference
     def grab_data(self):
         '''grabs data and creates a set of objects that will help translate into components of the visual down below. 
         b/c bizfunc coordinates the color, we need those, and then conntectiontype will coordinate the lines so we need those, etc...
         returns self.df because that is assumed to be the graph inputs. This allows the graph to rerender with different inputs b/c the graphing equation requires inputs, instead of just assuming the input is self.df and there fore cannot be reconfigured (with slicers)'''
         self.graph_inputs = self.generate_main_df("Application Connections")
         self.app_bizfunc_dict = self.generate_dict_from_table('Applications', "Name", "Business Function")
-        self.integration_tofrom_name_dict=self.generate_pipedict_from_table('Application Connections', 'Application Data From', "Application Data To", "Name")
         self.integration_name_bizfunc_dict=self.generate_dict_from_table('Application Connections', "Name", "Business Function")
-        self.integration_tofrom_connecttype_dict=self.generate_pipedict_from_table('Application Connections', 'Application Data From', "Application Data To", "Connection Type")
+        self.integration_name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
+        self.integration_name_connecttype_dict=self.generate_dict_from_table('Application Connections', "Name", "Connection Type")
+        self.integration_name_tofrom_dict= self.generate_dict_from_table('Application Connections', "Name", 'Application Data From', "Application Data To")
         self.name_description_dict = self.generate_dict_from_table('Application Connections', "Name", "Further Comments")
         self.name_description_dict.update(self.generate_dict_from_table('Applications', "Name", "Function"))
         self.name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
         self.name_department_dict.update(self.generate_dict_from_table('Applications', "Name", "Department Driver"))
-        self.integration_name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
-        self.integration_name_connecttype_dict=self.generate_dict_from_table('Application Connections', "Name", "Connection Type")
+        self.duplicate_reference=self.generate_duplicate_reference()
         return self.graph_inputs
 #endregion
 #region plotly/networkx (arrange network visual)
@@ -217,50 +228,20 @@ class AirtableVisualizer():
             self.df = pd.concat([self.df, new_row_df], ignore_index=True)
 
         return new_connections  
-    def adjust_connection_position(self, pos, connection, dx, dy):
-        """
-        Adjusts the positions of nodes and edges of a particular connection by 
-        a specified x and/or y amount.
-
-        Parameters:
-            G (nx.Graph): The graph.
-            pos (dict): The positions of the nodes.
-            connection (tuple): The connection to adjust as a tuple of node names (node1, node2).
-            dx (float): The x adjustment.
-            dy (float): The y adjustment.
-        """
-        node1, node2 = connection
-        pos[node1] = (pos[node1][0] + dx, pos[node1][1] + dy)
-        pos[node2] = (pos[node2][0] + dx, pos[node2][1] + dy)
-        return pos
     def remove_invisble_edges(self, G, new_connetions):
         '''Connections were fabricated to produce clean pos (positions) on the graph. Once the positions are generated, we want to delete the new connections, as they are not based on the input'''
         for connection in new_connetions:
             if G.has_edge(connection[0], connection[1]):
-                G.remove_edge(connection[0], connection[1])
-    def adjust_node_position(self, pos, node, dx, dy):
-        # Update the position of the specified node
-        pos[node] = (pos[node][0] + dx, pos[node][1] + dy)
-        return pos
-    def handle_adjustments(self, adjustments, pos):
-        '''takes an adjustments object and makes all adjustments as a one-liner
-        if the key is a tuple, moves both nodes and the edge between them, nothing else (not v useful)
-        if the key is a string, moves that node and all connected edges'''
-        # if no adjustments, returns existing position and continues
-        adjusted_pos = pos
-
-        for nodes, adj_values in adjustments.items():
-            try:
-                x_adj = adj_values['x']
-                y_adj = adj_values['y']
-                if isinstance(nodes, tuple):
-                    adjusted_pos = self.adjust_connection_position(pos, nodes, x_adj, y_adj)
-                else:
-                    adjusted_pos = self.adjust_node_position(pos, nodes, x_adj, y_adj)
-            except KeyError:
-                # wont work if the adjustment was filtered out!
                 pass
-        return adjusted_pos
+                # G.remove_edge(connection[0], connection[1])
+    def find_keys_for_edge_pair(self, dictionary, edge_pair):
+        '''explain'''
+        result_keys = []
+        for key, value in dictionary.items():
+            # Check if the set of values in the dictionary entry matches the set of items in edge_pair
+            if set(value) == set(edge_pair):
+                result_keys.append(key)
+        return result_keys
     def wrap_text(self, input):
         '''wraps text but replacing spaces with line breaks, making every new space put text on new line'''
         text=str(input)
@@ -315,7 +296,7 @@ class AirtableVisualizer():
         self.color_map = self.return_colormap()
         color = self.color_map[biz_func]
         return f'rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})'
-    def get_line_style(self,edge):
+    def get_line_style(self,integration):
         '''maps a particular line style per connection'''
         line_style_map = {
             'Prebuilt Connector': {'color': '#8de5a1', 'line': 'solid'},
@@ -326,15 +307,46 @@ class AirtableVisualizer():
             'Home-grown API': {'color': '#888', 'line': 'solid'},
             # 'CONNECT CLUSTERS': {'color': 'rgba(0, 0, 0, 0)', 'line': 'dash'}
         }
-        connection_type = self.integration_tofrom_connecttype_dict.get(f"{edge[0]}|{edge[1]}")
+
+        # this needs to be coded differently!
+        connection_type = self.integration_name_connecttype_dict[integration]
         return line_style_map.get(connection_type, {'color': '#888', 'line': 'solid'})
     def handle_line_style(self, G):
         '''groups the line styles'''
-        grouped_edges = defaultdict(list)
-        for edge in G.edges():
-            style = self.get_line_style(edge)
-            grouped_edges[(style['color'], style['line'])].append(edge)
-        return grouped_edges
+        grouped_integration = defaultdict(list)
+        for edge_pair in G.edges():
+            for integration in self.find_keys_for_edge_pair(self.integration_name_tofrom_dict, edge_pair):
+                style = self.get_line_style(integration)
+                grouped_integration[(style['color'], style['line'])].append(integration)
+        return grouped_integration
+    def handle_mnode_position(self, input, integration, x0, x1, y0, y1):
+        '''the nodes in the middle of the edge (mnode) it handles multiple integrations per node set by placing many 'mnodes' or middle edge nodes, one per integration
+        input needs to be 'y position' or 'x position' '''
+        # No need to calculate segment length for single mnode, 
+        # as it should be positioned at the midpoint
+        midpoint_x = (x0 + x1) / 2
+        midpoint_y = (y0 + y1) / 2
+
+        mnode_x_position = midpoint_x
+        mnode_y_position = midpoint_y
+
+        mnode_info = self.duplicate_reference.get(integration, (0, 1, 0))
+        mnode_total = mnode_info[1]
+        mnode_index = mnode_info[2] + .5
+        if mnode_total > 1:
+            length_x = x1 - x0
+            length_y = y1 - y0
+            segment_length_x = length_x / (mnode_total + 2)
+            segment_length_y = length_y / (mnode_total + 2)
+            mnode_x_position = midpoint_x + (mnode_index - mnode_total / 2) * segment_length_x
+            mnode_y_position = midpoint_y + (mnode_index - mnode_total / 2) * segment_length_y
+
+        if input == "y position":
+            return [mnode_y_position]
+        elif input == "x position":
+            return [mnode_x_position]
+        else:
+            return "RECONSIDER  INPUT VARIABLE"
     #endregion
     def load_data_into_visual(self, graph_inputs):
         '''first step to plotly, data should be df'''
@@ -347,28 +359,27 @@ class AirtableVisualizer():
         self.remove_invisble_edges(self.G, new_connections)
         return self.G, pos
     def handle_edges(self, G, pos):
-        '''this handles edges, and the nodes in the middle of the edge (mnode)'''
+        '''this handles edges generation'''
 
-        grouped_edges = self.handle_line_style(G)
+        grouped_integration = self.handle_line_style(G)
         traces = []
 
-        for (color, line), edges in grouped_edges.items():
+        for (color, line), integrations in grouped_integration.items():
             edge_x, edge_y, mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], [], [], []
+            for integration in integrations:
+                edges = self.integration_name_tofrom_dict[integration]
 
-            for edge in edges:
-                x0, y0 = pos[edge[0]]
-                x1, y1 = pos[edge[1]]
+                x0, y0 = pos[edges[0]]
+                x1, y1 = pos[edges[1]]
+
                 edge_x.extend([x0, x1, None])
                 edge_y.extend([y0, y1, None])
-
-                mnode_x.extend([(x0 + x1) / 2])
-                mnode_y.extend([(y0 + y1) / 2])
-                integration_name = self.integration_tofrom_name_dict.get(f"{edge[0]}|{edge[1]}")
-                integration_business_function = self.integration_name_bizfunc_dict.get(integration_name)
-                # print(integration_name, integration_business_function)
+                mnode_x.extend(self.handle_mnode_position('x position', integration, x0, x1, y0, y1))
+                mnode_y.extend(self.handle_mnode_position('y position', integration, x0, x1, y0, y1))
+                integration_business_function = self.integration_name_bizfunc_dict.get(integration)
                 mnode_colors.append(self.get_color(integration_business_function))
-                mnode_txt.extend([f'{integration_name}'])
-                connection_name.append(integration_name)
+                mnode_txt.extend([f'{integration}'])
+                connection_name.append(integration)
 
             edge_trace = go.Scatter(
                 x=edge_x,
@@ -390,7 +401,7 @@ class AirtableVisualizer():
                 hovertext=mnode_txt,
                 marker=dict(
                     color=mnode_colors,  # Using the generated color list
-                    opacity=0.5
+                    opacity=0.6
                 )
             )
             traces.append(mnode_trace)
@@ -458,7 +469,7 @@ class AirtableVisualizer():
                             width=800,  # Example width
                             height=800  # Example height, equal to width to make it square
                         ))
-        return fig
+        return fig 
     def create_legend(self):
         '''Create a legend figure without an accompanying graph.'''
         legend_data = [
@@ -486,13 +497,6 @@ class AirtableVisualizer():
         return go.Figure(data=legend_data, layout=layout)
     def handle_visual(self, graph_inputs):
         G, adjusted_pos = self.load_data_into_visual(graph_inputs)
-        # adjustments = {
-            # ("Zoom", "Fathom"): {"x": 0.4, "y": 0},
-        # "Airtable": {"x": -.1, "y": -.05},
-        # "BambooHR": {"x": -.05, "y": -.05},
-        # "Fieldwire": {"x": .03, "y": -.03}
-        # }
-        # adjusted_pos = self.handle_adjustments(adjustments, pos)
         edge_traces = self.handle_edges(G, adjusted_pos)
         node_trace = self.handle_nodes(G, adjusted_pos)
         fig = self.generate_viz(edge_traces, node_trace)
