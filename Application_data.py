@@ -622,11 +622,19 @@ class AirtableVisualizer():
 
         return list(filter(None, [line1, line2, line3]))
     #endregion
-    def run_dash(self, fig, legend_fig):
-        '''explain'''
-        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+    def run_dash(self, app, fig, legend_fig):
+        """
+        Configure and run the Dash application with the provided network graph and legend.
+        This function sets up the layout and callbacks of the Dash app.
+
+        Parameters:
+            app (dash.Dash): The Dash application instance.
+            fig (go.Figure): The Plotly graph object for the network graph.
+            legend_fig (go.Figure): The Plotly graph object for the legend.
+        """
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
+
         app.layout = dbc.Container(
             [
                 dbc.Row(
