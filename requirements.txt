@@ -7,3 +7,4 @@ dash
 dash-bootstrap-components
 gunicorn
 scipy
+dash-daq

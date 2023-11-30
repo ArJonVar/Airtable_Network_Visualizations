@@ -14,6 +14,7 @@ import networkx as nx
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
+import dash_daq as daq
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
@@ -357,33 +358,43 @@ class AirtableVisualizer():
 
         # Returns the sensitivity map
         return sensitivity_map  
+    def integration_in_edges(self, integration_pair, edge_view):
+        # Create both possible tuples for the integration pair
+        forward_edge = tuple(integration_pair)
+        reverse_edge = tuple(reversed(integration_pair))
+        if forward_edge in edge_view or reverse_edge in edge_view:
+            return True
+        return False
     def handle_mnode_boarder(self, G):
         '''groups the nodes by the three cases (all sensative data, all non sensative data, mixed) and adds the appropriate styling to the groups'''
         sensitivity_map = defaultdict(list)
 
         for integration in self.integration_name_datatype:
-            # Retrieves the data type for the integration, ensuring it's a list
-            dt_list = self.name_datatype_dict.get(integration, [])
-            dt_list = dt_list if isinstance(dt_list, list) else [dt_list]       
+            # making sure this cross references G.nodes which holds the filtered nodes
+            if self.integration_in_edges(self.integration_name_tofrom_dict[integration], G.edges): 
+                # Retrieves the data type for the integration, ensuring it's a list
+                dt_list = self.name_datatype_dict.get(integration, [])
+                dt_list = dt_list if isinstance(dt_list, list) else [dt_list]       
 
-            # Creating a set of sensitivities to avoid duplicates
-            sensitivity_agg = {self.datatype_sensitivity.get(dt) for dt in dt_list}      
+                # Creating a set of sensitivities to avoid duplicates
+                sensitivity_agg = {self.datatype_sensitivity.get(dt) for dt in dt_list}      
 
-            # Determine the status based on the aggregated sensitivities
-            if sensitivity_agg == {'Sensitive'}:
-                status = 'sensitive'
-            elif sensitivity_agg == {'Non-Sensitive'}:
-                status = 'non-sensitive'
-            else:
-                status = 'mixed'        
+                # Determine the status based on the aggregated sensitivities
+                if sensitivity_agg == {'Sensitive'}:
+                    status = 'sensitive'
+                elif sensitivity_agg == {'Non-Sensitive'}:
+                    status = 'non-sensitive'
+                else:
+                    status = 'mixed'        
 
-            # Append the integration to the appropriate category in sensitivity_map
-            sensitivity_map[status].append(integration)        
+                # Append the integration to the appropriate category in sensitivity_map
+                sensitivity_map[status].append(integration)        
 
-            # print(integration, ":  ", list(sensitivity_agg), status)
+                # print(integration, ":  ", list(sensitivity_agg), status)
 
         # Returns the sensitivity map
         return sensitivity_map            
+    
     #endregion
     def load_data_into_visual(self, graph_inputs):
         '''first step to plotly, data should be df'''
@@ -461,6 +472,70 @@ class AirtableVisualizer():
             traces.append(mnode_trace)
 
         return traces
+    def handle_multiple_edges(self, G, pos):
+        '''this handles edges, and the nodes in the middle of the edge (mnode)'''
+
+        grouped_integration = self.handle_line_style(G)
+        traces = []
+
+        for (color, line), integrations in grouped_integration.items():
+            edge_x, edge_y, mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], [], [], []
+            for integration in integrations:
+                edges = self.integration_name_tofrom_dict[integration]
+                x0, y0 = pos[edges[0]]
+                x1, y1 = pos[edges[1]]
+                mnode_info = self.duplicate_reference.get(integration)
+
+                if mnode_info:
+                    edge_count = mnode_info[1]  # Number of edges determined by self.duplicate_reference
+                    mnode_index = mnode_info[2]  # Mnode index
+                else:
+                    edge_count = 1  # Default to 1 if no info is found
+                    mnode_index = 0
+
+                # Calculate the offset based on the number of edges and mnode index
+                if edge_count <= 2:
+                    edge_spacing = 0.1  # Reduce spacing for two edges
+                else:
+                    edge_spacing = 0.06 / (edge_count)  # Adjust spacing for three or more edges          
+
+                offset_x = -edge_spacing * (edge_count - 1) / 2 + mnode_index * edge_spacing
+                offset_x = 0
+                edge_x.extend([x0 + offset_x, x1 + offset_x, None])
+                edge_y.extend([y0, y1, None])
+                mnode_x.extend([(x0 + x1) / 2 + offset_x])
+                mnode_y.extend([(y0 + y1) / 2])
+                integration_business_function = self.integration_name_bizfunc_dict.get(integration)
+                mnode_colors.append(self.get_color(integration_business_function))
+                mnode_txt.extend([f'{integration}'])
+                connection_name.append(integration)
+
+            edge_trace = go.Scatter(
+                x=edge_x,
+                y=edge_y,
+                line=dict(width=0.5, color=color, dash=line),
+                hoverinfo='text',
+                hovertext="doesn't work",
+                mode='lines'
+            )
+            traces.append(edge_trace)
+
+            mnode_trace = go.Scatter(
+                x=mnode_x,
+                y=mnode_y,
+                customdata=connection_name,
+                mode="markers",
+                showlegend=False,
+                hovertemplate="%{hovertext}<extra></extra>",
+                hovertext=mnode_txt,
+                marker=dict(
+                    color=mnode_colors,  # Using the generated color list
+                    opacity=0.5
+                )
+            )
+            traces.append(mnode_trace)
+
+        return traces
     def handle_nodes(self, G, pos):
         '''handles the nodes. First groups the nodes by data sensitivity, then comutes each nodes location, color, and finally creates a formatted trace'''
         grouped_nodes = self.handle_node_boarder(G)
@@ -485,7 +560,9 @@ class AirtableVisualizer():
                     line=self.sensitivity_formatting[sensitivity],
                     size=37,  # Adjust size to be slightly larger than main markers
                 ),
-                hoverinfo='none',  # This disables the hover text
+                hoverinfo='none',
+                # hovertext=node_hovertext,
+                customdata=app_name, 
                 showlegend=False
             )
             traces.append(outer_border_trace)
@@ -497,6 +574,7 @@ class AirtableVisualizer():
                 textposition='middle center',  # Centers text in circles
                 hoverinfo='text',
                 hovertext=node_hovertext,
+                name = sensitivity,
                 marker=dict(
                     color=node_colors,
                     size=34,
@@ -591,8 +669,21 @@ class AirtableVisualizer():
             value = ', '.join(value)
         return value
     def create_slicer_options(self, options_list):
-        '''explain'''
-        options = [{'label': option, 'value': option} for option in options_list]
+        '''builds the slicer label & values'''
+        options = []
+        for option in options_list:
+            if option == "Information Technology":
+                options.append({'label': "IT", 'value': option}) 
+            elif option == "Digital Construction Team":
+                options.append({'label': "DCT", 'value': option}) 
+            elif option == "Management":
+                options.append({'label': "MGMT", 'value': option}) 
+            elif option == "Human Resources":
+                options.append({'label': "HR", 'value': option}) 
+            elif option == "Project Management":
+                options.append({'label': "BUILD", 'value': option})  
+            else:
+                options.append({'label': option, 'value': option}) 
         return options
     def dash_wrap_paragraph(self, text):
         '''dash wrap text is different than the plotly wrap text, which was for node titles. this is for descriptions'''
@@ -618,7 +709,15 @@ class AirtableVisualizer():
             line3 += "..."  # If there's more content, add "..."    
 
         return list(filter(None, [line1, line2, line3]))
-    #endregion
+    def is_sensitive_data_type(self, data_type):
+        if isinstance(data_type, list):
+            # If data_type is a list, check if any of the types in the list is 'Sensitive'
+            return any(self.datatype_sensitivity.get(dt) == 'Sensitive' for dt in data_type)
+        else:
+            # If data_type is not a list, proceed as before
+            return self.datatype_sensitivity.get(data_type) == 'Sensitive'
+
+        #endregion
     def run_dash(self, app, fig, legend_fig):
         """
         Configure and run the Dash application with the provided network graph and legend.
@@ -643,20 +742,39 @@ class AirtableVisualizer():
                 ),
                 dbc.Row(
                     [
-                        dcc.Checklist(
-                            id='department-checklist',
-                            options=self.create_slicer_options(options_list),
-                            value=options_list,  # Default value
-                            inline=True,
-                            inputStyle={"margin-right": "3px", "margin-left": "6px"}  # Adds space around the checkbox itself
-                        ),
                         dbc.Col(
-                            dcc.Graph(
-                                id='network-graph',
-                                figure=fig,
-                                style={'width': '800px', 'height': 'auto'}  # Set the width to 800px and let height adjust automatically
-                            ),
-                            style={'paddingRight': 0, 'paddingLeft': 0}  # Remove padding from the column
+                            [
+                                dbc.Row([
+                                    dbc.Col(
+                                        daq.BooleanSwitch(
+                                            id='sensitivity-boolean',
+                                            on=False,
+                                            label="Sensitive-Only",
+                                            labelPosition="bottom"
+                                        ),
+                                        width=2,  # Adjust as necessary
+                                    ),
+                                    dbc.Col(
+                                        dcc.Checklist(
+                                            id='department-checklist',
+                                            options=self.create_slicer_options(options_list),
+                                            value=options_list,  # Default value
+                                            inline=True,
+                                            inputStyle={"margin-right": "3px", "margin-left": "6px", "padding-top":"12px"}  # Adds space around the checkbox itself
+                                        ),
+                                        width=7,  # Adjust as necessary
+                                    )
+                                ]),
+                                dbc.Col(
+                                    dcc.Graph(
+                                        id='network-graph',
+                                        figure=fig,
+                                        style={'height': 'auto'}  # Let the width be automatically adjusted
+                                    ),
+                                    width=12,  # Make this take up the full width of the nested row
+                                )
+                            ],
+                            width=6,  # Half the outer row
                         ),
                         dbc.Col(
                             [
@@ -669,13 +787,16 @@ class AirtableVisualizer():
                                     config={'displayModeBar': False}
                                 ),
                             ],
+                            width=6,  # The other half of the outer row
                         ),
                     ],
-                    className="align-items-start"  # Align the tops of the columns
+                    className="align-items-start",  # Align the tops of the columns
+                    justify="start"
                 ),
             ],
             fluid=True
         )
+
 
 
         # drilldown text
@@ -701,13 +822,13 @@ class AirtableVisualizer():
             # print(customdata, department_driver, connection_type)
             if connection_type != None:
                 drilldown_text = [
-                html.H5(f"Node: {node_label}"),
+                html.H5(f"{node_label}"),
                 html.P(f"Department Driver: {department_driver}"),
                 html.P(f"Connection Type: {connection_type}"),
                 html.P(f"Data Type: {data_type}")]
             else:
                 drilldown_text = [
-                html.H5(f"Node: {node_label}"),
+                html.H5(f"{node_label}"),
                 html.P(f"Department Driver: {department_driver}"),
                 html.P(f"Data Type: {data_type}")]
 
@@ -722,13 +843,20 @@ class AirtableVisualizer():
         
         # slicer updates
         @app.callback(
+            # grabs slicer values
             Output('network-graph', 'figure'),
-            Input('department-checklist', 'value')
+            [
+                Input('sensitivity-boolean', 'on'),
+                Input('department-checklist', 'value')
+            ]
         )
-        def update_graph(selected_departments):
-            # Filter your graph data based on the selected_departments
-
+        def update_graph(is_sensitive_only, selected_departments):
+            # Filter your graph data based on the selected_departments (filters integrations, not nodes)
             filtered_inputs = self.graph_inputs[self.graph_inputs['Department Driver'].isin(selected_departments)]
+            if is_sensitive_only:   
+                sensitive_mask = filtered_inputs['Data Types'].apply(self.is_sensitive_data_type)
+                filtered_inputs = filtered_inputs[sensitive_mask]
+                # print(filtered_inputs)
             fig, legend_fig = self.handle_visual(filtered_inputs)
             fig.update_layout(transition_duration=250)
             return fig
