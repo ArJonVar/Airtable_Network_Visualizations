@@ -384,7 +384,6 @@ class AirtableVisualizer():
 
         # Returns the sensitivity map
         return sensitivity_map            
-    
     #endregion
     def load_data_into_visual(self, graph_inputs):
         '''first step to plotly, data should be df'''
@@ -486,6 +485,7 @@ class AirtableVisualizer():
                     line=self.sensitivity_formatting[sensitivity],
                     size=37,  # Adjust size to be slightly larger than main markers
                 ),
+                hoverinfo='none',  # This disables the hover text
                 showlegend=False
             )
             traces.append(outer_border_trace)
