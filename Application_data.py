@@ -159,8 +159,12 @@ class AirtableVisualizer():
         b/c bizfunc coordinates the color, we need those, and then conntectiontype will coordinate the lines so we need those, etc...
         returns self.df because that is assumed to be the graph inputs. This allows the graph to rerender with different inputs b/c the graphing equation requires inputs, instead of just assuming the input is self.df and there fore cannot be reconfigured (with slicers)'''
         self.graph_inputs = self.generate_main_df("Application Connections")
-        self.app_bizfunc_dict = self.generate_dict_from_table('Applications', "Name", "Business Function")
-        self.integration_name_bizfunc_dict=self.generate_dict_from_table('Application Connections', "Name", "Business Function")
+        self.dept_df = self.generate_main_df("Department")
+        self.integration_name_datatype=self.generate_dict_from_table('Application Connections', "Name", "Data Types")
+        self.application_datatype=self.generate_dict_from_table('Applications', "Name", "Data Types")
+        self.datatype_sensitivity=self.generate_dict_from_table('Data Types', "Name", "Impact Criteria")
+        self.app_dept_dict = self.generate_dict_from_table('Applications', "Name", "Department Driver")
+        self.integration_name_bizfunc_dict = self.generate_dict_from_table('Application Connections', "Name", "Business Function")
         self.integration_name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
         self.integration_name_connecttype_dict=self.generate_dict_from_table('Application Connections', "Name", "Connection Type")
         self.integration_name_tofrom_dict= self.generate_dict_from_table('Application Connections', "Name", 'Application Data From', "Application Data To")
@@ -168,6 +172,8 @@ class AirtableVisualizer():
         self.name_description_dict.update(self.generate_dict_from_table('Applications', "Name", "Function"))
         self.name_department_dict = self.generate_dict_from_table('Application Connections', "Name", "Department Driver")
         self.name_department_dict.update(self.generate_dict_from_table('Applications', "Name", "Department Driver"))
+        self.name_datatype_dict = self.generate_dict_from_table('Application Connections', "Name", "Data Types")
+        self.name_datatype_dict.update(self.generate_dict_from_table('Applications', "Name", "Data Types"))
         self.duplicate_reference=self.generate_duplicate_reference()
         return self.graph_inputs
 #endregion
@@ -248,33 +254,11 @@ class AirtableVisualizer():
         return text.replace(' ', '<br>')
     def return_colormap(self):
         '''explain'''
-        # WHY IS THIS HARDCODED???
-        unique_business_functions = ["Business Function Scripting", 
-                                     "Enhanced Productivity", 
-                                     "Safety & Compliance", 
-                                    #  "CRM", 
-                                     "File Management", 
-                                    #  "Issue Tracking/Support System", 
-                                     "Financial Management", 
-                                     "User Friendly Database", 
-                                     "Communication", 
-                                    #  "Business Intelligence", 
-                                    #  "Engineering", 
-                                     "Employee Insurance", 
-                                     "Human Resource Management", 
-                                    #  "Recruiting",
-                                    #  "Employee Investment",
-                                    #  "Contract Management",
-                                     "Security",
-                                     "IT Ticket Management",
-                                     "Learning/Training",
-                                     "Asset Creation/Editing",
-                                     "Data Management",
-                                     "Marketing"]
+        dept = self.dept_df['Name'].tolist()
 
 
         # Determine the number of colors needed
-        n_colors = max(len(unique_business_functions), 20)
+        n_colors = max(len(dept), 20)
 
         colors_per_palette = n_colors // 3
         remaining_colors = n_colors % 3  # To handle the case where n_colors is not divisible by 3
@@ -285,16 +269,16 @@ class AirtableVisualizer():
         )
 
         color_map = {
-            business_function: color_palette[i]
-            for i, business_function in enumerate(unique_business_functions)
+            param: color_palette[i]
+            for i, param in enumerate(dept)
         }
         return color_map
-    def get_color(self, biz_func):
+    def get_color(self, param):
         '''returns a color per biz func'''
-        if biz_func is None:
+        if param is None:
             return 'rgba(200,200,200,1)'  # Default color for nodes with no matching data
         self.color_map = self.return_colormap()
-        color = self.color_map[biz_func]
+        color = self.color_map[param]
         return f'rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})'
     def get_line_style(self,integration):
         '''maps a particular line style per connection'''
@@ -305,7 +289,6 @@ class AirtableVisualizer():
             'VSC Uploads': {'color': '#888', 'line': 'dash'},
             'Manual': {'color': '#ff9f9b', 'line': 'dash'},
             'Home-grown API': {'color': '#888', 'line': 'solid'},
-            # 'CONNECT CLUSTERS': {'color': 'rgba(0, 0, 0, 0)', 'line': 'dash'}
         }
 
         # this needs to be coded differently!
@@ -347,16 +330,70 @@ class AirtableVisualizer():
             return [mnode_x_position]
         else:
             return "RECONSIDER  INPUT VARIABLE"
+    def handle_node_boarder(self, G):
+        '''groups the nodes by the three cases (all sensative data, all non sensative data, mixed) and adds the appropriate styling to the groups'''
+        sensitivity_map = defaultdict(list)
+
+        for node in G.nodes():
+            # Retrieves the data type for the node, ensuring it's a list
+            dt_list = self.name_datatype_dict.get(node[:len(node)], [])
+            dt_list = dt_list if isinstance(dt_list, list) else [dt_list]       
+
+            # Creating a set of sensitivities to avoid duplicates
+            sensitivity_agg = {self.datatype_sensitivity.get(dt) for dt in dt_list}      
+
+            # Determine the status based on the aggregated sensitivities
+            if sensitivity_agg == {'Sensitive'}:
+                status = 'sensitive'
+            elif sensitivity_agg == {'Non-Sensitive'}:
+                status = 'non-sensitive'
+            else:
+                status = 'mixed'        
+
+            # Append the node to the appropriate category in sensitivity_map
+            sensitivity_map[status].append(node)        
+
+            # print(node, ":  ", list(sensitivity_agg), status)
+
+        # Returns the sensitivity map
+        return sensitivity_map  
+    def handle_mnode_boarder(self, G):
+        '''groups the nodes by the three cases (all sensative data, all non sensative data, mixed) and adds the appropriate styling to the groups'''
+        sensitivity_map = defaultdict(list)
+
+        for integration in self.integration_name_datatype:
+            # Retrieves the data type for the integration, ensuring it's a list
+            dt_list = self.name_datatype_dict.get(integration, [])
+            dt_list = dt_list if isinstance(dt_list, list) else [dt_list]       
+
+            # Creating a set of sensitivities to avoid duplicates
+            sensitivity_agg = {self.datatype_sensitivity.get(dt) for dt in dt_list}      
+
+            # Determine the status based on the aggregated sensitivities
+            if sensitivity_agg == {'Sensitive'}:
+                status = 'sensitive'
+            elif sensitivity_agg == {'Non-Sensitive'}:
+                status = 'non-sensitive'
+            else:
+                status = 'mixed'        
+
+            # Append the integration to the appropriate category in sensitivity_map
+            sensitivity_map[status].append(integration)        
+
+            # print(integration, ":  ", list(sensitivity_agg), status)
+
+        # Returns the sensitivity map
+        return sensitivity_map            
+    
     #endregion
     def load_data_into_visual(self, graph_inputs):
         '''first step to plotly, data should be df'''
         # should be subset of 1st or second column, not a column w specific name!
         self.df = graph_inputs.dropna(subset=['Application Data To'])
         initial_G = nx.from_pandas_edgelist(self.df, 'Application Data From', 'Application Data To')
-        new_connections = self.handle_disconnected_clusters(initial_G)
+        self.new_connections = self.handle_disconnected_clusters(initial_G)
         self.G = nx.from_pandas_edgelist(self.df, 'Application Data From', 'Application Data To')
         pos = nx.kamada_kawai_layout(self.G)
-        self.remove_invisble_edges(self.G, new_connections)
         return self.G, pos
     def handle_edges(self, G, pos):
         '''this handles edges generation'''
@@ -365,7 +402,7 @@ class AirtableVisualizer():
         traces = []
 
         for (color, line), integrations in grouped_integration.items():
-            edge_x, edge_y, mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], [], [], []
+            edge_x, edge_y = [], []
             for integration in integrations:
                 edges = self.integration_name_tofrom_dict[integration]
 
@@ -374,12 +411,6 @@ class AirtableVisualizer():
 
                 edge_x.extend([x0, x1, None])
                 edge_y.extend([y0, y1, None])
-                mnode_x.extend(self.handle_mnode_position('x position', integration, x0, x1, y0, y1))
-                mnode_y.extend(self.handle_mnode_position('y position', integration, x0, x1, y0, y1))
-                integration_business_function = self.integration_name_bizfunc_dict.get(integration)
-                mnode_colors.append(self.get_color(integration_business_function))
-                mnode_txt.extend([f'{integration}'])
-                connection_name.append(integration)
 
             edge_trace = go.Scatter(
                 x=edge_x,
@@ -390,7 +421,30 @@ class AirtableVisualizer():
                 mode='lines'
             )
             traces.append(edge_trace)
+        return traces
+    def handle_mnodes(self, G, pos):
+        '''handles mnodes (middle of edge nodes)'''
+        sensitivity_formatting = {
+            'sensitive': dict(color='rgba(255, 0, 0,.7)', width=1), 
+            'mixed':dict(color='rgba(255, 0, 0,.7)', width=1), 
+            'non-sensitive':dict(color='rgba(128,128,128,.4)', width=0.5)
+        }
+        grouped_integrations = self.handle_mnode_boarder(G)
+        traces = []
+        for sensitivity in grouped_integrations:
+            mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], []
+            for integration in grouped_integrations[sensitivity]:
+                # to grab the position of the edge, that the mnode will go on
+                edges = self.integration_name_tofrom_dict[integration]
+                x0, y0 = pos[edges[0]]
+                x1, y1 = pos[edges[1]]
 
+                mnode_x.extend(self.handle_mnode_position('x position', integration, x0, x1, y0, y1))
+                mnode_y.extend(self.handle_mnode_position('y position', integration, x0, x1, y0, y1))
+                integration_dept = self.integration_name_department_dict.get(integration)
+                mnode_colors.append(self.get_color(integration_dept))
+                mnode_txt.extend([f'Int: {integration}'])
+                connection_name.append(integration)
             mnode_trace = go.Scatter(
                 x=mnode_x,
                 y=mnode_y,
@@ -401,62 +455,75 @@ class AirtableVisualizer():
                 hovertext=mnode_txt,
                 marker=dict(
                     color=mnode_colors,  # Using the generated color list
-                    opacity=0.6
+                    opacity=0.6,
+                    line=sensitivity_formatting[sensitivity]
                 )
             )
             traces.append(mnode_trace)
 
         return traces
     def handle_nodes(self, G, pos):
-        '''explain'''
+        '''handles the nodes. First groups the nodes by data sensitivity, then comutes each nodes location, color, and finally creates a formatted trace'''
+        grouped_nodes = self.handle_node_boarder(G)
+        traces = []
+        self.annotations = []
 
-        node_x = [pos[node][0] for node in G.nodes()]
-        node_y = [pos[node][1] for node in G.nodes()]
-
-        node_colors = [self.get_color(self.app_bizfunc_dict.get(app)) for app in G.nodes()]
-
-        node_adjacencies = []
-        node_text = []
-        app_name=[] #for custom metadata that can help w/onclicks
-        for node, adjacencies in enumerate(G.adjacency()):
-            node_adjacencies.append(len(adjacencies[1]))
-            # Generate hover text for each node (app, Biz Func - # Connections)
-            # node_text.append(f'{adjacencies[0]}, {self.app_bizfunc_dict.get(adjacencies[0])} - {str(len(adjacencies[1]))} connections')  # adjacencies[0] holds the name of the application
-            node_text.append(f'{adjacencies[0]}, {self.app_bizfunc_dict.get(adjacencies[0])}')
-            app_name.append(adjacencies[0])
-        # adjusted_zoom_fathom = adjust_connection_positions(G, pos, ("Zoom", "Fathom"), 0.3, 0)
-
-        node_trace = go.Scatter(
-            x=node_x, y=node_y,
-            mode='markers+text',
-            # text=[adjacencies[0] for adjacencies in G.adjacency()],  # Add node labels
-            customdata=app_name,
-            textposition='middle center',  # Centers text in circles
-            hoverinfo='text',
-            hovertext=node_text,
-            marker=dict(
-                color=node_colors,
-                size=37,
-                line_width=1)
+        for sensitivity in grouped_nodes:
+            node_x, node_y, node_text_wrapped, app_name, node_hovertext, node_colors=[],[],[],[],[],[]
+            for node in grouped_nodes[sensitivity]:
+                node_x.append(pos[node][0])
+                node_y.append(pos[node][1])
+                node_hovertext.append(f'App: {node}')
+                app_name.append(node)
+                node_colors.append(self.get_color(self.app_dept_dict.get(node)))
+                node_text_wrapped.append(self.wrap_text(node))
+            
+            outer_border_trace = go.Scatter(
+                x=node_x,
+                y=node_y,
+                mode="markers",
+                marker=dict(
+                    line=self.sensitivity_formatting[sensitivity],
+                    size=37,  # Adjust size to be slightly larger than main markers
+                ),
+                showlegend=False
             )
+            traces.append(outer_border_trace)
 
-        node_text_wrapped = [self.wrap_text(node) for node in G.nodes()]
-
-        self.annotations = [
-            dict(
-                x=x, y=y,
-            xref='x', yref='y',
-                text=text,
-                showarrow=False,
-                font=dict(size=7),
-                align='center'
+            node_trace = go.Scatter(
+                x=node_x, y=node_y,
+                mode='markers+text',
+                customdata=app_name,
+                textposition='middle center',  # Centers text in circles
+                hoverinfo='text',
+                hovertext=node_hovertext,
+                marker=dict(
+                    color=node_colors,
+                    size=34,
+                    line=dict(color='rgba(229,236,246,255)', width=2),  # Replace with your desired outer border color
+                )
             )
-            for x, y, text in zip(node_x, node_y, node_text_wrapped)
-        ]
-        return node_trace
-    def generate_viz(self, edge_traces, node_trace):
+            
+            traces.append(node_trace)
+
+
+            node_labels = [
+                dict(
+                    x=x, y=y,
+                xref='x', yref='y',
+                    text=text,
+                    showarrow=False,
+                    font=dict(size=7),
+                    align='center'
+                )
+                for x, y, text in zip(node_x, node_y, node_text_wrapped)
+            ]
+            self.annotations.extend(node_labels)
+        return traces
+ 
+    def generate_viz(self, data):
         '''explain'''
-        fig = go.Figure(data=edge_traces + [node_trace], 
+        fig = go.Figure(data=data, 
                         layout=go.Layout(
                             # title='<br>Network Graph made with Python',
                             titlefont_size=16,
@@ -496,12 +563,19 @@ class AirtableVisualizer():
 
         return go.Figure(data=legend_data, layout=layout)
     def handle_visual(self, graph_inputs):
-        G, adjusted_pos = self.load_data_into_visual(graph_inputs)
-        edge_traces = self.handle_edges(G, adjusted_pos)
-        node_trace = self.handle_nodes(G, adjusted_pos)
-        fig = self.generate_viz(edge_traces, node_trace)
+        G, pos = self.load_data_into_visual(graph_inputs)
+        # nodes will be colored by department
+        self.node_color_param = self.dept_df['Name'].tolist()
+        self.sensitivity_formatting = {
+            'sensitive': dict(color='rgba(255, 0, 0,1)', width=1), 
+            'mixed':dict(color='rgba(255, 0, 0,1)', width=1), 
+            'non-sensitive':dict(color='rgba(128,128,128,.7)', width=0.5)
+        }
+        node_traces = self.handle_nodes(G, pos)
+        mnode_traces = self.handle_mnodes(G, pos)
+        edge_traces = self.handle_edges(G, pos)
+        fig = self.generate_viz(edge_traces + mnode_traces + node_traces)
         legend_fig = self.create_legend()
-        # return fig, legend_fig, 
         return fig, legend_fig
     def show_locally(self, fig, legend_fig):
         '''shows graph locally'''
@@ -548,19 +622,11 @@ class AirtableVisualizer():
 
         return list(filter(None, [line1, line2, line3]))
     #endregion
-    def run_dash(self, app, fig, legend_fig):
-        """
-        Configure and run the Dash application with the provided network graph and legend.
-        This function sets up the layout and callbacks of the Dash app.
-
-        Parameters:
-            app (dash.Dash): The Dash application instance.
-            fig (go.Figure): The Plotly graph object for the network graph.
-            legend_fig (go.Figure): The Plotly graph object for the legend.
-        """
+    def run_dash(self, fig, legend_fig):
+        '''explain'''
+        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
-
         app.layout = dbc.Container(
             [
                 dbc.Row(
@@ -624,6 +690,7 @@ class AirtableVisualizer():
             # Fetch more info based on the clicked node (replace this with your logic)
             department_driver = self.name_department_dict.get(customdata).lower().capitalize()
             connection_type = self.integration_name_connecttype_dict.get(customdata)
+            data_type = self.separate_list_keep_str(self.name_datatype_dict.get(customdata))
             description = f"Description: {self.name_description_dict.get(customdata)}"
             description_text_wrapped = self.dash_wrap_paragraph(description)
             # print(customdata, department_driver, connection_type)
@@ -631,11 +698,13 @@ class AirtableVisualizer():
                 drilldown_text = [
                 html.H5(f"Node: {node_label}"),
                 html.P(f"Department Driver: {department_driver}"),
-                html.P(f"Connection Type: {connection_type}")]
+                html.P(f"Connection Type: {connection_type}"),
+                html.P(f"Data Type: {data_type}")]
             else:
                 drilldown_text = [
                 html.H5(f"Node: {node_label}"),
-                html.P(f"Department Driver: {department_driver}")]
+                html.P(f"Department Driver: {department_driver}"),
+                html.P(f"Data Type: {data_type}")]
 
             
             for line in description_text_wrapped:
