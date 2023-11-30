@@ -584,17 +584,14 @@ class AirtableVisualizer():
 #endregion
 #region dash (configure dynamic frontend)
     #region dash helpers
+    def separate_list_keep_str(self, value):
+        '''if str, return str, if list, return comma seperated str'''
+        if isinstance(value, list):
+            # Convert list to comma-separated string
+            value = ', '.join(value)
+        return value
     def create_slicer_options(self, options_list):
-        """
-        Generate options for a Dash slicer (filter) component based on a list of options.
-        This method is used to create selectable filter options in the Dash app.
-    
-        Parameters:
-            options_list (list): A list of option values for the slicer.
-    
-        Returns:
-            list: A list of dictionaries, each representing an option for the Dash slicer.
-        """
+        '''explain'''
         options = [{'label': option, 'value': option} for option in options_list]
         return options
     def dash_wrap_paragraph(self, text):
