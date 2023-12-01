@@ -824,19 +824,26 @@ class AirtableVisualizer():
                 drilldown_text = [
                 html.H5(f"{node_label}"),
                 html.P(f"Department Driver: {department_driver}"),
-                html.P(f"Connection Type: {connection_type}"),
-                html.P(f"Data Type: {data_type}")]
+                html.P(f"Connection Type: {connection_type}")]
             else:
                 drilldown_text = [
                 html.H5(f"{node_label}"),
-                html.P(f"Department Driver: {department_driver}"),
-                html.P(f"Data Type: {data_type}")]
+                html.P(f"Department Driver: {department_driver}")]
 
-            
             for line in description_text_wrapped:
                 # adjusting the style makes the line spacing left, so it looks connected
                 drilldown_text.append(html.P(line, style={'margin': '0.25em 0'}))
-
+            
+            drilldown_text.extend([
+                html.P(f"Data Type: {data_type}", style={'margin-top': '17px', 'margin-bottom':'0px'}),
+                html.A(
+                    "Parameter Definitions",
+                    href="https://publish.smartsheet.com/c7c9fdb5e54048d58f72bf1f5c2754bd",
+                    target="_blank",
+                    style={'font-size': '12px',
+                           'margin-bottom': '-6px'}  # You can adjust the size as needed
+                )
+            ])
 
             # Format the information for display
             return html.Div(drilldown_text)
