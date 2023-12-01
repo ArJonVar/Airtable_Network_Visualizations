@@ -683,7 +683,7 @@ class AirtableVisualizer():
             elif option == "Project Management":
                 options.append({'label': "BUILD", 'value': option})  
             else:
-                options.append({'label': option, 'value': option}) 
+                options.append({'label': option.upper(), 'value': option}) 
         return options
     def dash_wrap_paragraph(self, text):
         '''dash wrap text is different than the plotly wrap text, which was for node titles. this is for descriptions'''
