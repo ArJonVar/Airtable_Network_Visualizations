@@ -331,7 +331,7 @@ class AirtableVisualizer():
             return [mnode_x_position]
         else:
             return "RECONSIDER  INPUT VARIABLE"
-    def handle_node_boarder(self, G):
+    def handle_node_border(self, G):
         '''groups the nodes by the three cases (all sensative data, all non sensative data, mixed) and adds the appropriate styling to the groups'''
         sensitivity_map = defaultdict(list)
 
@@ -365,7 +365,7 @@ class AirtableVisualizer():
         if forward_edge in edge_view or reverse_edge in edge_view:
             return True
         return False
-    def handle_mnode_boarder(self, G):
+    def handle_mnode_border(self, G):
         '''groups the nodes by the three cases (all sensative data, all non sensative data, mixed) and adds the appropriate styling to the groups'''
         sensitivity_map = defaultdict(list)
 
@@ -566,6 +566,7 @@ class AirtableVisualizer():
         fig = self.generate_viz(edge_traces + mnode_traces + node_traces)
         return fig
 #endregion
+
 #region dash (configure dynamic frontend)
     #region dash helpers
     def separate_list_keep_str(self, value):
