@@ -439,7 +439,7 @@ class AirtableVisualizer():
             'mixed':dict(color='rgba(255, 0, 0,.7)', width=1), 
             'non-sensitive':dict(color='rgba(128,128,128,.4)', width=0.5)
         }
-        grouped_integrations = self.handle_mnode_boarder(G)
+        grouped_integrations = self.handle_mnode_border(G)
         traces = []
         for sensitivity in grouped_integrations:
             mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], []
@@ -472,73 +472,9 @@ class AirtableVisualizer():
             traces.append(mnode_trace)
 
         return traces
-    def handle_multiple_edges(self, G, pos):
-        '''this handles edges, and the nodes in the middle of the edge (mnode)'''
-
-        grouped_integration = self.handle_line_style(G)
-        traces = []
-
-        for (color, line), integrations in grouped_integration.items():
-            edge_x, edge_y, mnode_x, mnode_y, mnode_txt, mnode_colors, connection_name = [], [], [], [], [], [], []
-            for integration in integrations:
-                edges = self.integration_name_tofrom_dict[integration]
-                x0, y0 = pos[edges[0]]
-                x1, y1 = pos[edges[1]]
-                mnode_info = self.duplicate_reference.get(integration)
-
-                if mnode_info:
-                    edge_count = mnode_info[1]  # Number of edges determined by self.duplicate_reference
-                    mnode_index = mnode_info[2]  # Mnode index
-                else:
-                    edge_count = 1  # Default to 1 if no info is found
-                    mnode_index = 0
-
-                # Calculate the offset based on the number of edges and mnode index
-                if edge_count <= 2:
-                    edge_spacing = 0.1  # Reduce spacing for two edges
-                else:
-                    edge_spacing = 0.06 / (edge_count)  # Adjust spacing for three or more edges          
-
-                offset_x = -edge_spacing * (edge_count - 1) / 2 + mnode_index * edge_spacing
-                offset_x = 0
-                edge_x.extend([x0 + offset_x, x1 + offset_x, None])
-                edge_y.extend([y0, y1, None])
-                mnode_x.extend([(x0 + x1) / 2 + offset_x])
-                mnode_y.extend([(y0 + y1) / 2])
-                integration_business_function = self.integration_name_bizfunc_dict.get(integration)
-                mnode_colors.append(self.get_color(integration_business_function))
-                mnode_txt.extend([f'{integration}'])
-                connection_name.append(integration)
-
-            edge_trace = go.Scatter(
-                x=edge_x,
-                y=edge_y,
-                line=dict(width=0.5, color=color, dash=line),
-                hoverinfo='text',
-                hovertext="doesn't work",
-                mode='lines'
-            )
-            traces.append(edge_trace)
-
-            mnode_trace = go.Scatter(
-                x=mnode_x,
-                y=mnode_y,
-                customdata=connection_name,
-                mode="markers",
-                showlegend=False,
-                hovertemplate="%{hovertext}<extra></extra>",
-                hovertext=mnode_txt,
-                marker=dict(
-                    color=mnode_colors,  # Using the generated color list
-                    opacity=0.5
-                )
-            )
-            traces.append(mnode_trace)
-
-        return traces
     def handle_nodes(self, G, pos):
         '''handles the nodes. First groups the nodes by data sensitivity, then comutes each nodes location, color, and finally creates a formatted trace'''
-        grouped_nodes = self.handle_node_boarder(G)
+        grouped_nodes = self.handle_node_border(G)
         traces = []
         self.annotations = []
 
@@ -611,35 +547,10 @@ class AirtableVisualizer():
                             annotations=self.annotations,
                             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                            width=800,  # Example width
-                            height=800  # Example height, equal to width to make it square
+                            width=900,  # Example width
+                            height=900  # Example height, equal to width to make it square
                         ))
         return fig 
-    def create_legend(self):
-        '''Create a legend figure without an accompanying graph.'''
-        legend_data = [
-            go.Scatter(
-                x=[None],  # No actual data points
-                y=[None],
-                mode='markers',
-                marker=dict(
-                    size=10,
-                    color=f'rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})'
-                ),
-                name=label,
-                hoverinfo='none'
-            ) for i, (label, color) in enumerate(self.color_map.items())
-        ]
-
-        layout = {
-            'xaxis': {'visible': False},
-            'yaxis': {'visible': False},
-            'margin': {'l': 0, 'r': 0, 't': 0, 'b': 0},
-            'height': 400,
-            'width': 300
-        }
-
-        return go.Figure(data=legend_data, layout=layout)
     def handle_visual(self, graph_inputs):
         G, pos = self.load_data_into_visual(graph_inputs)
         # nodes will be colored by department
@@ -653,12 +564,7 @@ class AirtableVisualizer():
         mnode_traces = self.handle_mnodes(G, pos)
         edge_traces = self.handle_edges(G, pos)
         fig = self.generate_viz(edge_traces + mnode_traces + node_traces)
-        legend_fig = self.create_legend()
-        return fig, legend_fig
-    def show_locally(self, fig, legend_fig):
-        '''shows graph locally'''
-        fig.show()
-        legend_fig.show()
+        return fig
 #endregion
 #region dash (configure dynamic frontend)
     #region dash helpers
@@ -668,22 +574,55 @@ class AirtableVisualizer():
             # Convert list to comma-separated string
             value = ', '.join(value)
         return value
-    def create_slicer_options(self, options_list):
+    def create_dept_slicer_options(self, options_list):
         '''builds the slicer label & values'''
         options = []
+        # Where is best place to add all?
         for option in options_list:
+            color_set = self.color_map[option]
+            complete_color = f'rgb({int(color_set[0]*255)}, {int(color_set[1]*255)}, {int(color_set[2]*255)})'
+            bullet = html.Span('•', style={'fontSize': '20px', 'fontWeight': 'bold', 'color': complete_color})
+
+            label_text = option
             if option == "Information Technology":
-                options.append({'label': "IT", 'value': option}) 
+                label_text = "IT"
             elif option == "Digital Construction Team":
-                options.append({'label': "DCT", 'value': option}) 
+                label_text ="DCT"
             elif option == "Management":
-                options.append({'label': "MGMT", 'value': option}) 
+                label_text = "MGMT"
             elif option == "Human Resources":
-                options.append({'label': "HR", 'value': option}) 
+                label_text = "HR"
             elif option == "Project Management":
-                options.append({'label': "BUILD", 'value': option})  
+                label_text = "BUILD" 
+            elif option == "All":
+                label_text=  "General-Use"
+
+            # Text style set to normal weight and black color
+            text_style = {'fontWeight': 'normal', 'color': 'black'}
+
+            label = html.Div(children=[bullet, ' ', html.Span(label_text.upper(), style=text_style)], 
+                             style={'display': 'inline-flex', 'alignItems': 'center', 'whiteSpace': 'nowrap'})
+            options.append({'label': label, 'value': option}) 
+        return options
+    def create_connection_slicer_options(self):
+        options_raw = [{'label': "Proprietary", 'value': "Proprietary"},{'label': "Manual", 'value': "Manual"}, {'label': "Purchased", 'value': "Purchased"}]
+        options = []
+        for option in options_raw:
+            label_text = option['label']
+            if label_text == "Manual":
+                color = 'red'
+                line = html.Span('--', style={'fontSize': '20px', 'fontWeight': 'bold', 'color': color})
+            elif label_text == "Purchased":
+                color = 'green'
+                line = html.Span('—', style={'fontSize': '20px', 'fontWeight': 'bold', 'color': color})
             else:
-                options.append({'label': option.upper(), 'value': option}) 
+                color = 'black'
+                line = html.Span('—', style={'fontSize': '20px', 'fontWeight': 'bold', 'color': color})
+
+            text_style = {'fontWeight': 'normal', 'color': 'black'}
+            label = html.Div(children=[line, '  ', html.Span(label_text.upper(), style=text_style)], 
+                             style={'display': 'inline-flex', 'alignItems': 'center', 'whiteSpace': 'nowrap'})
+            options.append({'label': label, 'value': option['value']}) 
         return options
     def dash_wrap_paragraph(self, text):
         '''dash wrap text is different than the plotly wrap text, which was for node titles. this is for descriptions'''
@@ -716,9 +655,31 @@ class AirtableVisualizer():
         else:
             # If data_type is not a list, proceed as before
             return self.datatype_sensitivity.get(data_type) == 'Sensitive'
+    def filter_apps_bydept(self, selected_app_departments, current_inputs):
+        '''has to filter the apps by looking at the integrations and making sure integrations only stay if both apps are in selected departments'''
+        filtered_apps = []
+        # ! Arbitrary rule that when under four picks, remove the alls
+        for dept in selected_app_departments:
+            for app in self.app_dept_dict:
+                if self.app_dept_dict[app] == dept:
+                    filtered_apps.append(app)
 
-        #endregion
-    def run_dash(self, app, fig, legend_fig):
+        mask_to = current_inputs['Application Data To'].isin(filtered_apps)
+        mask_from = current_inputs['Application Data From'].isin(filtered_apps)
+        combined_mask = mask_to & mask_from
+        filtered_df = current_inputs[combined_mask]
+    
+        return filtered_df
+    def generic_filter(self, selected_options, selected_options_dict, filter_column, current_inputs):
+        '''filters df with options from column. selected_options_dict translates the selected options into backend options'''
+        true_selected_options = []
+        for option in selected_options:
+            true_selected_options.extend(selected_options_dict[option])
+
+        filtered_df = current_inputs[current_inputs[filter_column].isin(true_selected_options )]
+        return filtered_df
+    #endregion
+    def run_dash(self, app, fig):
         """
         Configure and run the Dash application with the provided network graph and legend.
         This function sets up the layout and callbacks of the Dash app.
@@ -730,74 +691,95 @@ class AirtableVisualizer():
         """
 
         options_list = [value for value in list(set(self.integration_name_department_dict.values())) if str(type(value)) == "<class 'str'>"]
-
+        options_list.append('All')
         app.layout = dbc.Container(
             [
                 dbc.Row(
                     dbc.Col(
                         html.H2("IT Application Integration Map", className="text-center"),
-                        width=12
-                    ),
-                    className="mb-4"  # Adjust bottom margin as needed
+                        width=12,
+                        style = {
+                            'border-bottom': '20px solid transparent',  
+                            'border-top': '10px solid transparent',     
+                            'border-left': '0px solid transparent',  
+                            'border-right': '0px solid transparent' 
+                        }
+                    )
                 ),
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            [
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Row([
+                            dcc.Graph(
+                                    id='network-graph',
+                                    figure=fig,
+                                    style={'width': '900px', 'height': '900px'}  # Set specific pixel dimensions
+                                ),
+                            dbc.Col([
+                                html.H3("Description"),
+                                html.Div(id='clicked-data', children="Click on a node to learn more!"),
+                                html.H3("Filters", className="mt-4"),
                                 dbc.Row([
+                                    dbc.Col([
+                                       html.H6("Departments:"),
+                                       dcc.Checklist(
+                                           id='department-checklist-app',
+                                           # Assuming 'create_slicer_options' and 'options_list' are defined elsewhere
+                                           options=self.create_dept_slicer_options(options_list),
+                                           value=options_list,
+                                           inline=False,
+                                           inputStyle={"margin-right": "5px"}
+                                       )
+                                    ],
+                                    width = 3, style={"margin-bottom": "20px"}),
+                                    dbc.Col([
+                                       html.H6("Integration Type:"),
+                                       dcc.Checklist(
+                                           id='integration-type',
+                                           # Assuming 'create_slicer_options' and 'options_list' are defined elsewhere
+                                           options=self.create_connection_slicer_options(),
+                                           value=["Proprietary", "Manual", "Purchased"],
+                                           inline=False,
+                                           inputStyle={"margin-right": "5px"}
+                                       ),  
+                                    #  spacer                          
+                                       html.H6("Time Frame:", style={"margin-top": "30px"}),
+                                       dcc.Checklist(
+                                           id='status',
+                                           # Assuming 'create_slicer_options' and 'options_list' are defined elsewhere
+                                           options=[{'label': "Past", 'value': "Past"},
+                                                  {'label': "Present", 'value': "Present"},
+                                                  {'label': "Future", 'value': "Future"}],
+                                           value=["Present"],
+                                           inline=False,
+                                           inputStyle={"margin-right": "5px"}
+                                       )
+                                    ],
+                                    width = 3, style={"margin-bottom": "20px"}),
+                                ]),
+                                dbc.Row(
                                     dbc.Col(
+                                    html.Div(
                                         daq.BooleanSwitch(
                                             id='sensitivity-boolean',
                                             on=False,
                                             label="Sensitive-Only",
                                             labelPosition="bottom"
                                         ),
-                                        width=2,  # Adjust as necessary
+                                        className="d-flex"
                                     ),
-                                    dbc.Col(
-                                        dcc.Checklist(
-                                            id='department-checklist',
-                                            options=self.create_slicer_options(options_list),
-                                            value=options_list,  # Default value
-                                            inline=True,
-                                            inputStyle={"margin-right": "3px", "margin-left": "6px", "padding-top":"12px"}  # Adds space around the checkbox itself
-                                        ),
-                                        width=7,  # Adjust as necessary
-                                    )
-                                ]),
-                                dbc.Col(
-                                    dcc.Graph(
-                                        id='network-graph',
-                                        figure=fig,
-                                        style={'height': 'auto'}  # Let the width be automatically adjusted
+                                    width={"size": 3, "offset": 0},  # Adjust the size to shrink the switch's column
+                                    className="d-flex align-items-center",  # This will vertically center the switch
                                     ),
-                                    width=12,  # Make this take up the full width of the nested row
-                                )
-                            ],
-                            width=6,  # Half the outer row
-                        ),
-                        dbc.Col(
-                            [
-                                html.H3("Description"),
-                                html.Div(id='clicked-data'),  # This div will display additional info on click
-                                html.H3("Legend", className="mt-4"),  # Add margin-top for spacing
-                                dcc.Graph(
-                                    id='legend',
-                                    figure=legend_fig,
-                                    config={'displayModeBar': False}
                                 ),
                             ],
-                            width=6,  # The other half of the outer row
-                        ),
-                    ],
-                    className="align-items-start",  # Align the tops of the columns
-                    justify="start"
-                ),
+                            # stops column from squishing together
+                            style={"minWidth": "550px", "whiteSpace": "normal", "margin-bottom": "20px"})
+                        ])
+                    ])
+                ])
             ],
             fluid=True
         )
-
-
 
         # drilldown text
         @app.callback(
@@ -840,8 +822,7 @@ class AirtableVisualizer():
                     "Parameter Definitions",
                     href="https://publish.smartsheet.com/c7c9fdb5e54048d58f72bf1f5c2754bd",
                     target="_blank",
-                    style={'font-size': '12px',
-                           'margin-bottom': '-6px'}  # You can adjust the size as needed
+                    style={'font-size': '12px'}  # You can adjust the size as needed
                 )
             ])
 
@@ -854,17 +835,34 @@ class AirtableVisualizer():
             Output('network-graph', 'figure'),
             [
                 Input('sensitivity-boolean', 'on'),
-                Input('department-checklist', 'value')
+                Input('department-checklist-app', 'value'),
+                Input('status', 'value'),
+                Input('integration-type', 'value'),
             ]
         )
-        def update_graph(is_sensitive_only, selected_departments):
-            # Filter your graph data based on the selected_departments (filters integrations, not nodes)
-            filtered_inputs = self.graph_inputs[self.graph_inputs['Department Driver'].isin(selected_departments)]
+        def update_graph(is_sensitive_only, selected_app_departments, selected_status, selected_integration_type):
+            # print(selected_app_departments)
+            connection_type_slicer_dict={
+                "Proprietary":["Home-grown API"], 
+                "Manual": ["Manual", "CSV Upload", "CLI"], 
+                'Purchased':["IPaas", "Prebuilt Connector"]
+            }
+            timeframe_slicer_dict={
+                "Past":[ "Past Integration"], 
+                "Present": ["Stable", "Semi Stable", "Soon to be replaced"], 
+                "Future":["Concept phase", "In development"]
+            }
+            filtered_inputs = self.graph_inputs
+            # dept filter needs to go first
+            filtered_inputs = self.filter_apps_bydept(selected_app_departments, filtered_inputs)
+            filtered_inputs = self.generic_filter(selected_status, timeframe_slicer_dict, 'Status', filtered_inputs)
+            filtered_inputs = self.generic_filter(selected_integration_type, connection_type_slicer_dict, 'Connection Type', filtered_inputs)
+            # filter sensative
             if is_sensitive_only:   
-                sensitive_mask = filtered_inputs['Data Types'].apply(self.is_sensitive_data_type)
-                filtered_inputs = filtered_inputs[sensitive_mask]
+                sensitivity_mask = filtered_inputs['Data Types'].apply(self.is_sensitive_data_type)
+                filtered_inputs = filtered_inputs[sensitivity_mask]
                 # print(filtered_inputs)
-            fig, legend_fig = self.handle_visual(filtered_inputs)
+            fig= self.handle_visual(filtered_inputs)
             fig.update_layout(transition_duration=250)
             return fig
 #endregion
@@ -879,7 +877,7 @@ av = AirtableVisualizer(config)
 # fetch data
 print("fetching data...")
 inputs = av.grab_data()
-fig, legend_fig = av.handle_visual(inputs)
+fig = av.handle_visual(inputs)
 # run Dash App
 print('running Dash...')
-av.run_dash(app, fig, legend_fig)
+av.run_dash(app, fig)
